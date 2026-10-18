@@ -1,4 +1,7 @@
-ARCHS = arm64
+# 设备为 A12(arm64e)。必须同时产出 arm64 与 arm64e 切片：
+# 纯 arm64 动态库/可执行文件会被 dyld 拒绝加载进 arm64e 进程
+# （报错 "arm64 dylibs cannot be loaded into arm64e processes"）。
+ARCHS = arm64 arm64e
 # 部署目标 iOS 12.2
 TARGET = iphone:clang:latest:12.2
 INSTALL_TARGET_PROCESSES = AppStore appstored
