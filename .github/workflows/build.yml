@@ -1,0 +1,60 @@
+name: Build AppStoreVersionSpoofer
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git make perl build-essential \
+            libcurl4-openssl-dev libxml2-dev fakeroot dpkg-dev bzip2 \
+            libtinfo6 xz-utils rsync zip
+          # 优先用 sysv 版 fakeroot，规避部分发行版 tcp 限制（Theos 官方安装脚本同款处理）
+          sudo update-alternatives --set fakeroot /usr/bin/fakeroot-sysv 2>/dev/null || true
+
+      - name: Setup Theos
+        run: |
+          git clone --recursive https://github.com/theos/theos.git "$HOME/theos"
+          echo "THEOS=$HOME/theos" >> "$GITHUB_ENV"
+
+      - name: Download iOS toolchain (Linux clang for iOS/arm64)
+        run: |
+          # Theos 官方 Linux 工具链来自 L1ghtmann/llvm-project 的预编译 release
+          curl -sL https://github.com/L1ghtmann/llvm-project/releases/latest/download/iOSToolchain-x86_64.tar.xz \
+            | tar -xJ -C "$THEOS/toolchain/"
+          echo "--- 验证 clang ---"
+          "$THEOS/toolchain/linux/iphone/bin/clang" --version
+
+      - name: Download iOS 12.4 SDK (patched, 含私有框架 tbd)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p "$THEOS/sdks"
+          # theos/sdks 的 release 资产中包含 iPhoneOS12.4.sdk.tar.xz（按版本精确选取）
+          SDK_URL=$(curl -sL -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/theos/sdks/releases/latest" \
+            | python3 -c "import sys,json; d=json.load(sys.stdin); print([a['browser_download_url'] for a in d['assets'] if a['name']=='iPhoneOS12.4.sdk.tar.xz'][0])")
+          echo "SDK_URL=$SDK_URL"
+          curl -sL "$SDK_URL" | tar -xJ -C "$THEOS/sdks"
+          ls -1 "$THEOS/sdks"
+
+      - name: Compile package (tweak + preferences bundle)
+        run: |
+          export THEOS="$THEOS"
+          make clean
+          make package FINALPACKAGE=1
+
+      - name: Upload .deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AppStoreVersionSpoofer-deb
+          path: packages/*.deb
