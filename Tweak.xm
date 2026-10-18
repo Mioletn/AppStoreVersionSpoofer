@@ -133,5 +133,8 @@ static CFTypeRef HookedMGCopyAnswer(CFStringRef key, uint32_t *outType) {
                         (IMP)HookedInitWithURL,
                         (IMP *)&orig_initWithURL);
     }
-    MSHookFunction(MGCopyAnswer, (IMP)HookedMGCopyAnswer, (IMP *)&orig_MGCopyAnswer);
+    // Objective-C++ 下 hook C 函数：保持 HookedMGCopyAnswer 与 MGCopyAnswer
+    // 签名完全一致，使用 MSHookFunction 的模板重载（不能强转成 IMP，否则
+    // 类型冲突导致模板推导失败；函数指针也不能隐式转 void*）。
+    MSHookFunction(MGCopyAnswer, HookedMGCopyAnswer, &orig_MGCopyAnswer);
 }
