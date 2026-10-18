@@ -6,6 +6,8 @@
     <string>AppStoreVersionSpooferPrefs</string>
     <key>CFBundleDisplayName</key>
     <string>AppStore Version Spoofer</string>
+    <key>NSPrincipalClass</key>
+    <string>RootListController</string>
     <key>CFBundleIdentifier</key>
     <string>com.custom.appstoreversionspoofer.prefs</string>
     <key>CFBundleExecutable</key>
