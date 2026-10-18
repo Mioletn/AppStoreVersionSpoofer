@@ -20,6 +20,12 @@
 @interface RootListController : PSListController
 @end
 
+// 类扩展中声明 specifiers 属性，让编译器为本类合成 _specifiers 实例变量，
+// 从而免依赖私有头文件即可编译（运行时由真实 PSListController 提供方法实现）。
+@interface RootListController ()
+@property (nonatomic, retain) NSArray *specifiers;
+@end
+
 @implementation RootListController
 
 - (NSArray *)specifiers {

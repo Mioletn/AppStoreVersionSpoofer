@@ -6,8 +6,6 @@
     <string>AppStoreVersionSpooferPrefs</string>
     <key>title</key>
     <string>AppStore Version Spoofer</string>
-    <key>icon</key>
-    <string></string>
     <key>shortDescription</key>
     <string>伪装 iOS 系统版本，绕过 App Store 版本校验</string>
 </dict>
