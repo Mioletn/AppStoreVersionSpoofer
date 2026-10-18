@@ -16,6 +16,9 @@ AppStoreVersionSpooferPrefs_RESOURCE_DIRS = Resources
 AppStoreVersionSpooferPrefs_INFO_PLIST_PATH = Resources/Info.plist
 AppStoreVersionSpooferPrefs_INSTALL_PATH = /Library/PreferenceBundles
 AppStoreVersionSpooferPrefs_FRAMEWORKS = Foundation
+# 链接私有 Preferences.framework（SDK 仅含其链接桩，无公开头文件，故源码用前向声明）。
+# 运行时 Settings 已加载该框架，符号在宿主进程内解析，不会造成重复加载/闪退。
+AppStoreVersionSpooferPrefs_PRIVATE_FRAMEWORKS = Preferences
 # 偏好 bundle 强制开启 ARC：直接对 _specifiers 实例变量赋值在 MRC 下会悬垂，
 # 开启 ARC 后由编译器自动管理内存，避免设置面板加载时随机崩溃。
 AppStoreVersionSpooferPrefs_CFLAGS = -fobjc-arc
