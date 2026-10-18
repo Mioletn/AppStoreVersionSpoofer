@@ -14,10 +14,12 @@
 #import <substrate.h>
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
+#import <dlfcn.h>
 
-// MGCopyAnswer 是 libMobileGestalt 的私有函数，SDK 不含其头文件，需手动声明。
-// 真实签名为 (CFStringRef question, uint32_t *outType)，返回 CF "Copy" 语义对象。
-extern "C" CFTypeRef MGCopyAnswer(CFStringRef question, uint32_t *outType);
+// MGCopyAnswer 是 libMobileGestalt 的私有函数，SDK 不含其头文件。
+// 不可在此处声明并直接引用该符号（会导致链接期 "undefined symbol" 错误），
+// 改为运行时用 dlsym 取得函数地址后再 hook（见 %ctor）。
+typedef CFTypeRef (*MGCopyAnswerFn)(CFStringRef question, uint32_t *outType);
 
 #pragma mark - 偏好读取
 
@@ -101,7 +103,7 @@ static id HookedInitWithURL(id self, SEL _cmd, NSURL *URL) {
 
 #pragma mark - 本地 ProductVersion 伪装
 
-static CFTypeRef (*orig_MGCopyAnswer)(CFStringRef, uint32_t *);
+static MGCopyAnswerFn orig_MGCopyAnswer = NULL;
 
 static CFTypeRef HookedMGCopyAnswer(CFStringRef key, uint32_t *outType) {
     NSString *fakeVer = GetFakeVersion();
@@ -133,8 +135,10 @@ static CFTypeRef HookedMGCopyAnswer(CFStringRef key, uint32_t *outType) {
                         (IMP)HookedInitWithURL,
                         (IMP *)&orig_initWithURL);
     }
-    // Objective-C++ 下 hook C 函数：保持 HookedMGCopyAnswer 与 MGCopyAnswer
-    // 签名完全一致，使用 MSHookFunction 的模板重载（不能强转成 IMP，否则
-    // 类型冲突导致模板推导失败；函数指针也不能隐式转 void*）。
-    MSHookFunction(MGCopyAnswer, HookedMGCopyAnswer, &orig_MGCopyAnswer);
+    // 运行时取 MGCopyAnswer 函数地址（避免链接期引用私有符号），
+    // 再用 MSHookFunction 模板重载 hook；HookedMGCopyAnswer 签名需与之一致。
+    MGCopyAnswerFn mgFn = (MGCopyAnswerFn)dlsym(RTLD_DEFAULT, "MGCopyAnswer");
+    if (mgFn) {
+        MSHookFunction(mgFn, HookedMGCopyAnswer, &orig_MGCopyAnswer);
+    }
 }
