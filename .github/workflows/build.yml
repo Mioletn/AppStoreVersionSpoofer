@@ -1,0 +1,50 @@
+name: Build AppStoreVersionSpoofer
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git make perl build-essential \
+            libcurl4-openssl-dev libxml2-dev fakeroot dpkg-dev bzip2
+
+      - name: Setup Theos
+        run: |
+          git clone --recursive https://github.com/theos/theos.git "$HOME/theos"
+          echo "THEOS=$HOME/theos" >> "$GITHUB_ENV"
+
+      - name: Setup Linux toolchain (clang for iOS arm64)
+        run: |
+          git clone https://github.com/theos/toolchain.git "$THEOS/toolchain"
+
+      - name: Download iOS 12 SDK (sparse checkout)
+        run: |
+          mkdir -p "$THEOS/sdks"
+          # theos/sdks 现已改为目录形式（非 .tar.xz），用 sparse-checkout 只拉 iOS 12 SDK
+          git clone --filter=blob:none --sparse https://github.com/theos/sdks.git /tmp/theos-sdks
+          cd /tmp/theos-sdks
+          git sparse-checkout set iPhoneOS12.4.sdk
+          mv iPhoneOS12.4.sdk "$THEOS/sdks/"
+          ls "$THEOS/sdks"
+
+      - name: Compile package
+        run: |
+          export THEOS="$THEOS"
+          make clean
+          make package FINALPACKAGE=1
+
+      - name: Upload .deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AppStoreVersionSpoofer-deb
+          path: packages/*.deb
