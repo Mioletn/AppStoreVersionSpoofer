@@ -2,12 +2,13 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>Entry</key>
-    <dict>
-        <key>bundle</key>
-        <string>AppStoreVersionSpooferPrefs</string>
-        <key>file</key>
-        <string>Root</string>
-    </dict>
+    <key>entry</key>
+    <string>AppStoreVersionSpooferPrefs</string>
+    <key>title</key>
+    <string>AppStore Version Spoofer</string>
+    <key>icon</key>
+    <string></string>
+    <key>shortDescription</key>
+    <string>伪装 iOS 系统版本，绕过 App Store 版本校验</string>
 </dict>
 </plist>
