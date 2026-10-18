@@ -15,6 +15,10 @@
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
 
+// MGCopyAnswer 是 libMobileGestalt 的私有函数，SDK 不含其头文件，需手动声明。
+// 真实签名为 (CFStringRef question, uint32_t *outType)，返回 CF "Copy" 语义对象。
+extern "C" CFTypeRef MGCopyAnswer(CFStringRef question, uint32_t *outType);
+
 #pragma mark - 偏好读取
 
 static NSString *const kPrefsSuite  = @"com.custom.appstoreversionspoofer";
