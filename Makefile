@@ -12,6 +12,7 @@ AppStoreVersionSpoofer_FRAMEWORKS = Foundation
 
 BUNDLE_NAME = AppStoreVersionSpooferPrefs
 AppStoreVersionSpooferPrefs_FILES = Preferences/RootListController.m
+AppStoreVersionSpooferPrefs_RESOURCE_DIRS = Resources
 AppStoreVersionSpooferPrefs_INSTALL_PATH = /Library/PreferenceBundles
 AppStoreVersionSpooferPrefs_FRAMEWORKS = UIKit Foundation
 AppStoreVersionSpooferPrefs_PRIVATE_FRAMEWORKS = Preferences
