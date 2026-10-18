@@ -22,3 +22,9 @@ AppStoreVersionSpooferApp_INSTALL_PATH = /Applications
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 include $(THEOS_MAKE_PATH)/application.mk
+
+# 强制把 AppInfo.plist 以 Info.plist 之名写入 app bundle（application.mk 的
+# INFOPLIST_FILE 变量在部分 Theos 版本未生效，导致 .app 缺 Info.plist 无法启动）。
+internal-stage::
+	$(ECHO_NOTHING)mkdir -p $(THEOS_STAGING_DIR)/Applications/$(APPLICATION_NAME).app$(ECHO_END)
+	$(ECHO_NOTHING)cp AppInfo.plist $(THEOS_STAGING_DIR)/Applications/$(APPLICATION_NAME).app/Info.plist$(ECHO_END)
