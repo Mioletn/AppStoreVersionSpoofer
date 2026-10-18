@@ -1,0 +1,7 @@
+#!/bin/sh
+# dpkg 安装后刷新 SpringBoard 图标缓存，让独立 App（版本伪装）出现在主屏。
+# 裸 dpkg -i 不会自动注册 /Applications 下的新 App，必须显式 uicache。
+uicache 2>/dev/null || /usr/bin/uicache 2>/dev/null || true
+# 兜底：重启 SpringBoard
+killall -9 SpringBoard 2>/dev/null || true
+exit 0
