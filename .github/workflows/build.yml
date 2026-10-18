@@ -47,7 +47,7 @@ jobs:
           curl -sL "$SDK_URL" | tar -xJ -C "$THEOS/sdks"
           ls -1 "$THEOS/sdks"
 
-      - name: Compile package (tweak + preferences bundle)
+      - name: Compile package (tweak + standalone app)
         run: |
           export THEOS="$THEOS"
           make clean

@@ -1,8 +1,8 @@
 Package: com.custom.appstoreversionspoofer
 Name: AppStoreVersionSpoofer
-Version: 1.0-5
+Version: 1.0-6
 Architecture: iphoneos-arm
 Maintainer: CustomDev
-Description: Spoof iOS version for AppStore server check and local app detection. iOS12.2 compatible.
-Depends: mobilesubstrate, preferenceloader
+Description: Spoof iOS version for AppStore server check and local app detection. Ships a standalone config app (no Settings integration). iOS12.2 compatible.
+Depends: mobilesubstrate
 Section: Tweaks
