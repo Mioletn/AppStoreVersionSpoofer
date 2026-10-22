@@ -138,13 +138,17 @@ extension LegacyLibraryViewController: UIDocumentPickerDelegate {
         guard !urls.isEmpty else { return }
         let banner = LegacyUI.Banner("Adding…", color: LegacyUI.surfaceHigh)
         banner.show(in: view, for: 30)
-        store.importAPKs(urls) { [weak self] newID in
+        store.importAPKs(urls) { [weak self] outcome in
             banner.removeFromSuperview()
             guard let self else { return }
             self.refresh()
-            if newID == nil {
-                LegacyUI.Banner("That did not import — check the log in Settings",
-                                color: LegacyUI.bad).show(in: self.view)
+            switch outcome {
+            case .added:
+                break
+            case .refused(let reason):
+                // The reason is the whole point: "that did not import" tells the
+                // user nothing about an .ipa picked instead of an .apk.
+                LegacyUI.Banner(reason, color: LegacyUI.bad).show(in: self.view)
             }
         }
     }

@@ -38,7 +38,16 @@ final class LegacyStore {
     private static func loadApp(dir: URL) -> TLApp? {
         let fm = FileManager.default
         guard let files = try? fm.contentsOfDirectory(atPath: dir.path) else { return nil }
-        let names = files.filter { $0.lowercased().hasSuffix(".apk") }
+        // A folder can also be filled by dropping a file into Husk's folder in
+        // the Files app, which skips the import's own checks. A package with no
+        // AndroidManifest.xml is not an Android app -- a build that filed an .ipa
+        // here left exactly such a row -- and offering it would only ever end in
+        // "could not execute", so it is left out of the list.
+        let names = files.filter { name in
+            guard name.lowercased().hasSuffix(".apk") else { return false }
+            return husk_tl_has_entry(dir.appendingPathComponent(name).path,
+                                     "AndroidManifest.xml") != 0
+        }
         let apks = names
             .sorted { a, b in
                 let ra = BundleUnpacker.rank(a, siblings: names)
@@ -71,13 +80,14 @@ final class LegacyStore {
 
     /// Copy APKs in and reload. Runs off the main thread: the copy is the slow
     /// part, and the shell has no reactive machinery to keep the UI honest
-    /// meanwhile, so it simply comes back when it is done.
-    func importAPKs(_ urls: [URL], completion: @escaping (String?) -> Void) {
+    /// meanwhile, so it simply comes back when it is done. The outcome carries
+    /// the reason when nothing was added, which is what the banner shows.
+    func importAPKs(_ urls: [URL], completion: @escaping (LegacyIngest.Outcome) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async {
-            let newID = LegacyIngest.copy(urls)
+            let outcome = LegacyIngest.copy(urls)
             DispatchQueue.main.async {
                 self.reload()
-                completion(newID)
+                completion(outcome)
             }
         }
     }

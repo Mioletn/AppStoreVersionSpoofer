@@ -26,13 +26,36 @@ enum LegacyIngest {
     /// a newer system, or it would be re-scanned for nothing.
     private static let scanVersion = 8
 
-    /// Copy APKs (or bundle files) in, describe them, and return the new app's
-    /// folder name. Synthesised work: nothing here blocks a caller's thread
-    /// beyond the file copy, so callers run it off the main queue.
-    static func copy(_ urls: [URL]) -> String? {
+    /// What an import produced. A refusal carries the words for the banner: an
+    /// .apk that is not an Android package (an .ipa picked by mistake, a renamed
+    /// zip of something else) has to say so, because the alternative is a
+    /// library row that can only ever fail to run -- the pixel loader finds no
+    /// arm64 libraries, falls through to the DEX path, finds no DEX, and reports
+    /// "could not execute" with no hint as to why.
+    enum Outcome {
+        case added(id: String)
+        case refused(reason: String)
+    }
+
+    /// Copy APKs (or bundle files) in, describe them, and report what happened.
+    /// Synthesised work: nothing here blocks a caller's thread beyond the file
+    /// copy, so callers run it off the main queue.
+    static func copy(_ urls: [URL]) -> Outcome {
         let fm = FileManager.default
         let root = TranslationLayer.root
-        guard !urls.isEmpty else { return nil }
+        guard !urls.isEmpty else { return .refused(reason: "Nothing was picked.") }
+
+        // An .ipa is the mistake worth catching before a byte is copied: "add"
+        // gets handed one whenever someone means to add the app they are already
+        // holding, and it is as big as a game, so finding out afterwards costs a
+        // minute of their time for nothing. Only the name can be judged here;
+        // what the file holds is judged below, after the copy.
+        for url in urls where Self.iosOnlyExtensions.contains(url.pathExtension.lowercased()) {
+            HuskLog.log("tl", "refused \(url.lastPathComponent): an .ipa is an iOS app, "
+                              + "not an Android package")
+            return .refused(reason: "“\(url.lastPathComponent)” is an iOS app — Husk runs "
+                                  + "Android apps. Add an .apk, .xapk, .apkm or .apks.")
+        }
 
         let dir = root.appendingPathComponent(UUID().uuidString, isDirectory: true)
         do {
@@ -48,11 +71,13 @@ enum LegacyIngest {
                     continue
                 }
 
-                var name = url.lastPathComponent
+                // Copied under the name it arrived with. Whether it is an APK is
+                // decided from its contents below, and only then does it get the
+                // extension -- a name alone proves nothing either way.
+                let name = url.lastPathComponent
                 // An expansion file goes to obb/ under its own name: the runtime
                 // finds it there when the game asks for Android/obb/<package>/<name>.
                 let isOBB = name.lowercased().hasSuffix(".obb")
-                if !isOBB && !name.lowercased().hasSuffix(".apk") { name += ".apk" }
                 let dest: URL
                 if isOBB {
                     let obb = dir.appendingPathComponent("obb", isDirectory: true)
@@ -73,22 +98,48 @@ enum LegacyIngest {
         } catch {
             try? fm.removeItem(at: dir)
             HuskLog.log("tl", "FAILED to add: \(error.localizedDescription)")
-            return nil
+            return .refused(reason: "Husk could not copy it: \(error.localizedDescription)")
         }
 
-        let names = ((try? fm.contentsOfDirectory(atPath: dir.path)) ?? [])
-            .filter { $0.lowercased().hasSuffix(".apk") }
-        guard !names.isEmpty else {
+        // Everything loose at the top of the folder is a candidate. obb/ is not,
+        // and neither are the hidden files the system leaves behind.
+        let loose = ((try? fm.contentsOfDirectory(atPath: dir.path)) ?? []).filter { name in
+            guard !name.hasPrefix(".") else { return false }
+            var isDirectory: ObjCBool = false
+            let exists = fm.fileExists(atPath: dir.appendingPathComponent(name).path,
+                                       isDirectory: &isDirectory)
+            return exists && !isDirectory.boolValue
+        }
+        guard !loose.isEmpty else {
             try? fm.removeItem(at: dir)
             HuskLog.log("tl", "nothing to install: no APK inside what was picked")
-            return nil
+            return .refused(reason: "That file is not an Android app: it holds no APK.")
         }
+
+        // Every Android package has AndroidManifest.xml at the root of the zip,
+        // and nothing else does. Checking here is what keeps an .ipa -- or any
+        // other archive someone renamed -- out of the library, where its row
+        // could only ever fail to run: the loader finds no arm64 libraries, falls
+        // through to the DEX path, finds no DEX, and reports "could not execute"
+        // with no hint as to why.
+        var packages: [String] = []
+        for name in loose {
+            let path = dir.appendingPathComponent(name).path
+            guard isAndroidPackage(path) else {
+                try? fm.removeItem(at: dir)
+                let why = refusal(for: path, named: name)
+                HuskLog.log("tl", "refused \(name): no AndroidManifest.xml inside — \(why)")
+                return .refused(reason: why)
+            }
+            packages.append(adopt(path, name, in: dir, fm: fm))
+        }
+
         // Same order the runtime takes them in: the app first, then what it
         // cannot run without, then the splits it does not need.
-        let apks = names
+        let apks = packages
             .sorted { a, b in
-                let ra = BundleUnpacker.rank(a, siblings: names)
-                let rb = BundleUnpacker.rank(b, siblings: names)
+                let ra = BundleUnpacker.rank(a, siblings: packages)
+                let rb = BundleUnpacker.rank(b, siblings: packages)
                 return ra != rb ? ra < rb : a < b
             }
             .map { dir.appendingPathComponent($0).path }
@@ -98,9 +149,78 @@ enum LegacyIngest {
         try? Data(json.utf8).write(to: dir.appendingPathComponent("report.json"))
         try? "\(scanVersion)".write(to: dir.appendingPathComponent("scan-version.txt"),
                                      atomically: true, encoding: .utf8)
-        HuskLog.log("tl", "installed \(dir.lastPathComponent) (\(names.count) apk)")
+        HuskLog.log("tl", "installed \(dir.lastPathComponent) (\(packages.count) apk)")
 
-        return dir.lastPathComponent
+        return .added(id: dir.lastPathComponent)
+    }
+
+    // MARK: judging what was picked
+
+    /// Extensions that only ever name an iOS app. Judged from the name alone,
+    /// before the copy, because the file is big and the answer cannot change.
+    private static let iosOnlyExtensions: Set<String> = ["ipa", "tipa", "app"]
+
+    /// Whether the file is an Android package: a zip with a manifest at its root.
+    /// Reads the central directory and nothing else, so this is cheap.
+    private static func isAndroidPackage(_ path: String) -> Bool {
+        husk_tl_has_entry(path, "AndroidManifest.xml") != 0
+    }
+
+    /// Give a validated package the name the rest of Husk looks for. The runtime
+    /// and LegacyStore both walk the folder for *.apk, so a file that arrived
+    /// under another name (a picker can hand back "update.bin") keeps its bytes
+    /// and gains the extension.
+    private static func adopt(_ path: String, _ name: String, in dir: URL,
+                              fm: FileManager) -> String {
+        guard !name.lowercased().hasSuffix(".apk") else { return name }
+        let renamed = name + ".apk"
+        do {
+            try fm.moveItem(atPath: path, toPath: dir.appendingPathComponent(renamed).path)
+            return renamed
+        } catch {
+            // Still a valid package; it just keeps its name. The scan below
+            // looks for the manifest, not for the extension.
+            HuskLog.log("tl", "could not rename \(name): \(error.localizedDescription)")
+            return name
+        }
+    }
+
+    /// Why a file that was picked is not an Android package, in words for the
+    /// banner. Cheap checks first: the name, then the first bytes, then the zip.
+    private static func refusal(for path: String, named name: String) -> String {
+        let ext = (name as NSString).pathExtension.lowercased()
+        if iosOnlyExtensions.contains(ext) {
+            return "“\(name)” is an iOS app — Husk runs Android apps."
+        }
+        if isMachO(path) {
+            return "“\(name)” is a bare iOS executable (Mach-O) — Husk runs Android apps."
+        }
+        if let entries = BundleUnpacker.entryNames(in: URL(fileURLWithPath: path)) {
+            // An .ipa is a zip whose contents sit under Payload/<name>.app.
+            // Renaming it does not change that, so the shape still gives it away.
+            let lower = entries.map { $0.lowercased() }
+            if lower.contains(where: { $0.hasPrefix("payload/") })
+                || lower.contains(where: { $0.hasSuffix(".app/info.plist") }) {
+                return "“\(name)” holds an iOS app (Payload/…app) — Husk runs Android apps."
+            }
+            return "“\(name)” is a zip, but not an Android package: "
+                 + "it has no AndroidManifest.xml."
+        }
+        return "“\(name)” is not an APK: it is not even a zip archive."
+    }
+
+    /// Whether the file starts with a Mach-O magic number, which is what an iOS
+    /// binary -- or a bare executable pulled out of an .ipa -- looks like.
+    private static func isMachO(_ path: String) -> Bool {
+        guard let handle = try? FileHandle(forReadingFrom: URL(fileURLWithPath: path)) else {
+            return false
+        }
+        defer { try? handle.huskClose() }
+        guard let head = try? handle.huskRead(upToCount: 4), head.count == 4 else { return false }
+        let magic = head.map { String(format: "%02x", Int($0)) }.joined()
+        // arm64 / armv7 and their big-endian twins, then the fat (universal) ones.
+        return ["cffaedfe", "cefaedfe", "feedfacf", "feedface",
+                "cafebabe", "bebafeca"].contains(magic)
     }
 
     // MARK: metadata

@@ -44,14 +44,30 @@ enum BundleUnpacker {
         return 3
     }
 
-    /// Copies every APK in `bundle` into `dir`. Returns their names.
-    @discardableResult
-    static func unpack(_ bundle: URL, into dir: URL) throws -> [String] {
-        let scoped = bundle.startAccessingSecurityScopedResource()
-        defer { if scoped { bundle.stopAccessingSecurityScopedResource() } }
-        let file = try FileHandle(forReadingFrom: bundle)
-        defer { try? file.huskClose() }
+    /// Every name in a zip's central directory, or nil if `file` is not a zip.
+    ///
+    /// Reads the directory and nothing else, so it is cheap enough to answer
+    /// "what is this file, really?" -- which is what an import has to ask before
+    /// it files something under Android that Android cannot open.
+    static func entryNames(in file: URL) -> [String]? {
+        let scoped = file.startAccessingSecurityScopedResource()
+        defer { if scoped { file.stopAccessingSecurityScopedResource() } }
+        guard let handle = try? FileHandle(forReadingFrom: file) else { return nil }
+        defer { try? handle.huskClose() }
+        return (try? centralDirectory(handle))?.map { $0.name }
+    }
 
+    /// One record of the central directory: what the file is called, how it is
+    /// stored, and where its local header sits.
+    private struct Entry {
+        let name: String
+        let method: UInt16
+        let compressed: UInt64
+        let localOffset: UInt64
+    }
+
+    /// The zip's central directory, in file order. Nothing is inflated.
+    private static func centralDirectory(_ file: FileHandle) throws -> [Entry] {
         let size = try file.huskSeekToEnd()
         // The end-of-central-directory record is in the last 64 KB plus 22 bytes.
         let tail = min(size, 70_000)
@@ -69,7 +85,7 @@ enum BundleUnpacker {
         guard let directory = try file.huskRead(upToCount: Int(dirSize)), directory.count == Int(dirSize) else { throw Failure.notAZip }
         let cd = [UInt8](directory)
 
-        var names: [String] = []
+        var entries: [Entry] = []
         var p = 0
         for _ in 0..<count {
             guard p + 46 <= cd.count, le32(cd, p) == 0x0201_4b50 else { break }
@@ -80,23 +96,38 @@ enum BundleUnpacker {
             guard p + 46 + nameLen <= cd.count else { break }
             let name = String(decoding: cd[(p + 46)..<(p + 46 + nameLen)], as: UTF8.self)
             p += 46 + nameLen + extraLen + commentLen
+            entries.append(Entry(name: name, method: method, compressed: compressed,
+                                 localOffset: localOffset))
+        }
+        return entries
+    }
 
-            let base = (name as NSString).lastPathComponent
-            guard base.lowercased().hasSuffix(".apk"), !name.hasSuffix("/") else { continue }
-            guard method == 0 else { throw Failure.unsupported("\(base) is compressed inside its bundle, which Husk cannot unpack yet.") }
+    /// Copies every APK in `bundle` into `dir`. Returns their names.
+    @discardableResult
+    static func unpack(_ bundle: URL, into dir: URL) throws -> [String] {
+        let scoped = bundle.startAccessingSecurityScopedResource()
+        defer { if scoped { bundle.stopAccessingSecurityScopedResource() } }
+        let file = try FileHandle(forReadingFrom: bundle)
+        defer { try? file.huskClose() }
+
+        var names: [String] = []
+        for e in try centralDirectory(file) {
+            let base = (e.name as NSString).lastPathComponent
+            guard base.lowercased().hasSuffix(".apk"), !e.name.hasSuffix("/") else { continue }
+            guard e.method == 0 else { throw Failure.unsupported("\(base) is compressed inside its bundle, which Husk cannot unpack yet.") }
 
             // The local header has its own name and extra lengths; the data follows them.
-            try file.huskSeek(toOffset: localOffset)
+            try file.huskSeek(toOffset: e.localOffset)
             guard let local = try file.huskRead(upToCount: 30), local.count == 30 else { throw Failure.notAZip }
             let lh = [UInt8](local)
-            let dataStart = localOffset + 30 + UInt64(le16(lh, 26)) + UInt64(le16(lh, 28))
+            let dataStart = e.localOffset + 30 + UInt64(le16(lh, 26)) + UInt64(le16(lh, 28))
             try file.huskSeek(toOffset: dataStart)
 
             let dest = dir.appendingPathComponent(base)
             FileManager.default.createFile(atPath: dest.path, contents: nil)
             let out = try FileHandle(forWritingTo: dest)
             defer { try? out.huskClose() }
-            var left = compressed
+            var left = e.compressed
             while left > 0 {
                 let chunk = Int(min(left, 4 << 20))
                 guard let data = try file.huskRead(upToCount: chunk), !data.isEmpty else { throw Failure.notAZip }

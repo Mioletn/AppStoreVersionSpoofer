@@ -142,6 +142,26 @@ enum LegacyUI {
 
         required init?(coder: NSCoder) { fatalError("not used") }
 
+        /// The label has no padding of its own, and a refusal is two or three
+        /// lines long ("…is an iOS app — Husk runs Android apps"), which would
+        /// otherwise sit on the rounded edge.
+        private static let inset = UIEdgeInsets(top: 10, left: 14, bottom: 10, right: 14)
+
+        override func textRect(forBounds bounds: CGRect,
+                               limitedToNumberOfLines lines: Int) -> CGRect {
+            let inner = CGRect(x: bounds.minX + Self.inset.left, y: bounds.minY + Self.inset.top,
+                               width: bounds.width - Self.inset.left - Self.inset.right,
+                               height: bounds.height - Self.inset.top - Self.inset.bottom)
+            let text = super.textRect(forBounds: inner, limitedToNumberOfLines: lines)
+            return CGRect(x: text.minX - Self.inset.left, y: text.minY - Self.inset.top,
+                          width: text.width + Self.inset.left + Self.inset.right,
+                          height: text.height + Self.inset.top + Self.inset.bottom)
+        }
+
+        override func drawText(in rect: CGRect) {
+            super.drawText(in: rect.inset(by: Self.inset))
+        }
+
         func show(in view: UIView, for seconds: TimeInterval = 4) {
             view.addSubview(self)
             NSLayoutConstraint.activate([
