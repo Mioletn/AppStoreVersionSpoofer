@@ -74,9 +74,10 @@ final class LegacySettingsViewController: UIViewController {
         let text = LegacyUI.body(
             "• Games on the older loader path: run here.\n"
             + "• Games on the native runtime (Unity, cocos2d-x, Minecraft, SDL, Unreal, Godot, "
-            + "GTA, GameMaker, Java apps, Flutter): need iOS 13 — they draw into a CAMetalLayer.\n"
-            + "• Full Android under QEMU: needs iOS 13 for the same reason, and far more RAM than "
-            + "an iOS 12 phone has.\n"
+            + "GTA, GameMaker, Java apps, Flutter): run here too — they draw into a CAMetalLayer, "
+            + "which iOS 8 has, through the ANGLE build the app carries.\n"
+            + "• Web apps: need iOS 15, where the WKWebView bridge lives.\n"
+            + "• Full Android under QEMU: not offered by this shell at all.\n"
             + "• JIT: from a debugger (JIT tab), as on every other iOS.", 14)
         stack.addArrangedSubview(LegacyUI.sectionTitle("What works on iOS 12.2"))
         stack.addArrangedSubview(card([text]))

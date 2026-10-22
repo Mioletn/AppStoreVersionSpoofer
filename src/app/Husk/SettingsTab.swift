@@ -208,9 +208,9 @@ final class CJKFonts: ObservableObject {
     static let shared = CJKFonts()
     static let fileName = "NotoSansCJK-Regular.ttc"
     static let source = URL(string: "https://github.com/notofonts/noto-cjk/raw/main/Sans/OTC/NotoSansCJK-Regular.ttc")!
-    nonisolated static var directory: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Fonts", isDirectory: true)
-    }
+    // One definition of the path, in IOS12Compat.swift: the native runtime needs it on 12.2 too,
+    // where this class does not exist.
+    nonisolated static var directory: URL { HuskFonts.directory }
     nonisolated static var installed: Bool { FileManager.default.fileExists(atPath: directory.appendingPathComponent(fileName).path) }
 
     @Published private(set) var isInstalled = CJKFonts.installed

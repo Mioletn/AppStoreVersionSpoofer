@@ -14,7 +14,7 @@ serves every version, and which half of it runs is decided at launch.
 | Entry point | `HuskAppDelegate` (`@UIApplicationMain`) | same |
 | Interface | `LegacyRootViewController` — UIKit, `src/app/LegacyUI` | `ContentView` in a `UIHostingController`, as upstream |
 | Old prototype loader (CPU framebuffer) | yes | yes |
-| Native runtime (Unity, cocos2d-x, Minecraft, SDL, Unreal, Godot, GTA, GameMaker, Java, Flutter) | no — `CAMetalLayer` is iOS 13+ | yes |
+| Native runtime (Unity, cocos2d-x, Minecraft, SDL, Unreal, Godot, GTA, GameMaker, Java, Flutter) | yes — through `TLUnityUIView` | yes |
 | Web apps (Capacitor, Cordova) | no — the WKWebView bridge is iOS 15+ | yes |
 | Full Android (QEMU guest) | no — display and RAM budget are iOS 13+ | yes |
 | PS4 layer | no — iOS 17.4+ | where it was |
@@ -25,8 +25,8 @@ SwiftUI screens are annotated `@available(iOS 15.0, *)` wholesale (see below) an
 are never touched on older systems; the legacy shell is deliberately
 SwiftUI-free and Combine-free, and shares only the plain model types
 (`TLApp`, `TLReport`, `TranslationLayer`, `BundleUnpacker`, `HuskLog`,
-`JITBootstrap`, `TLScreenUIView`), none of which carry an availability
-annotation.
+`JITBootstrap`, `TLScreenUIView`, `TLUnityUIView`), none of which carry an
+availability annotation.
 
 ## Why the SwiftUI layer is annotated 15.0 and not 13.0
 
@@ -69,11 +69,43 @@ Eight files, UIKit only:
 | `LegacyRootViewController.swift` | three tabs: Library, JIT, Settings |
 | `LegacyLibraryViewController.swift` | the app list, `+` imports through `UIDocumentPickerViewController` |
 | `LegacyJITViewController.swift` | live JIT state, and the two routes below |
-| `LegacyGameViewController.swift` | full-screen `TLScreenUIView` for a running app |
+| `LegacyGameViewController.swift` | full-screen `TLScreenUIView` (pixel path) or `TLUnityUIView` (native runtime) for a running app |
 | `LegacySettingsViewController.swift` | about, what works, log viewer, issue link |
 
 Tabs are text-only because SF Symbols is iOS 13+. The document picker uses the
 iOS 8 `documentTypes:` spelling rather than `UTType`.
+
+### The native runtime on 12.2
+
+The shell first shipped saying the native runtime (Unity, cocos2d-x, Minecraft,
+SDL, Unreal, Godot, GTA, GameMaker, Java, Flutter) needed iOS 13 "because it
+draws into a CAMetalLayer". That was wrong: `CAMetalLayer` is iOS 8, and the
+layer is handed straight to the ANGLE build this app carries, which is compiled
+for 12.2 like everything else. What was actually true is that `TLUnityUIView`
+and its `TLApp` helpers were annotated `@available(iOS 15.0, *)` along with the
+SwiftUI screens around them, so nothing could reference them from the shell.
+
+Dropping those annotations was the whole fix. Two things inside the view did
+need a guard, and both are UI-only concerns:
+
+* the extra-font folder was read through `CJKFonts`, an iOS 15 `ObservableObject`
+  because it is the download screen; the path now lives in `HuskFonts`
+  (`IOS12Compat.swift`) and `CJKFonts` forwards to it,
+* `GeodeSupport.files` reads per-game settings (`TLAppSettings`, iOS 15), so
+  Geode is simply off on 12.2 — a cocos2d-x game runs without the mod loader.
+
+`LegacyGameViewController` picks the screen the way upstream does: an app whose
+`report.nativeEngine` is non-nil gets a `TLUnityUIView` (which launches itself on
+first layout, exactly as in the SwiftUI path) and a status line polled from
+`husk_unity_state()` / `husk_unity_frames()`; everything else keeps the pixel
+path. There is no Stop button for the native screen because an engine cannot be
+unloaded once started — Back pauses it, as upstream's window close does.
+
+Two gaps this leaves on 12.2, both on the C side rather than the interface:
+Unreal and DXVK/SDL-Vulkan games need MoltenVK, which is an iOS 15 framework, so
+those launches fail cleanly; and the Java runtime (`java-runtime/`) is only built
+when `scripts/build_java_runtime.sh` has run, which CI does not do, so
+Java-runtime engines (libGDX, plain Java apps, Flutter) have nothing to start.
 
 ## JIT on iOS 12.2
 

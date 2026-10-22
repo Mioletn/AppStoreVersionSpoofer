@@ -50,6 +50,16 @@ extension FileHandle {
 
 // MARK: - Fonts
 
+/// Where the extra (CJK) fonts live. `CJKFonts` is an iOS 15 ObservableObject because
+/// it is the download UI, but the path is just Application Support; the native
+/// runtime asks for it directly and has to do so on 12.2 as well.
+enum HuskFonts {
+    nonisolated static var directory: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Fonts", isDirectory: true)
+    }
+}
+
 /// Stands in for `UIFont.monospacedSystemFont(ofSize:weight:)`, which is iOS
 /// 13+. Menlo ships on every iOS 12 device, so the only thing lost is the system
 /// UI font's exact metrics; the fallback keeps the app readable rather than

@@ -101,28 +101,20 @@ final class LegacyStore {
     /// Whether the app runs on the iOS 12 path at all.
     ///
     /// The native runtime (Unity, cocos2d-x, Minecraft, SDL, Unreal, Godot,
-    /// GTA, GameMaker, the Java runtime, Flutter) presents into a CAMetalLayer,
-    /// which is iOS 13+. Web apps (Capacitor, Cordova) run on WKWebView plus a
-    /// bridge that lives in the iOS 15+ UI layer. So on iOS 12 only the older
-    /// prototype loader -- the one that hands its frames to the CPU -- is
-    /// available: those apps are listed but not runnable here.
+    /// GTA, GameMaker, the Java runtime, Flutter) presents into a CAMetalLayer.
+    /// That layer is iOS 8, and it is handed straight to the ANGLE build this
+    /// app carries, so the runtime runs here -- this used to say iOS 13 and it
+    /// was wrong: 13 is where the SwiftUI screens around it start, not the
+    /// layer. Web apps are the ones that cannot run: the bridge they talk to
+    /// lives in the iOS 15 UI layer.
     func canRunOnThisiOS(_ app: TLApp) -> Bool {
-        guard #available(iOS 13.0, *) else {
-            return app.report?.runsOnNativeRuntime != true && app.report?.webKind == nil
-        }
-        return true
+        app.report?.webKind == nil
     }
 
     /// Why it cannot run here, in words for the library cell.
     func unavailableReason(_ app: TLApp) -> String? {
-        guard #available(iOS 13.0, *) else {
-            if app.report?.runsOnNativeRuntime == true {
-                return "Needs iOS 13 (the native runtime draws into a CAMetalLayer)"
-            }
-            if app.report?.webKind != nil {
-                return "Needs iOS 15 (web apps run on the WKWebView bridge)"
-            }
-            return nil
+        if app.report?.webKind != nil {
+            return "Needs iOS 15 (web apps run on the WKWebView bridge)"
         }
         return nil
     }

@@ -26,7 +26,10 @@ enum TLNativeEngine {
 /// Nothing is copied or composed here. The runtime hands the layer to EGL as the game's window; the
 /// game draws and presents on its own thread. This view's jobs are the layer's size, the pause that
 /// goes with leaving the screen, and turning touches into the pixel coordinates Android reports.
-@available(iOS 15.0, *)
+///
+/// No availability floor of its own: everything it does is UIKit from iOS 8 and a CAMetalLayer, which
+/// is iOS 8 too. It used to be marked 15.0 along with the SwiftUI screens that host it, and that is
+/// what made the legacy shell tell people the native runtime needed iOS 13 -- it never did.
 final class TLUnityUIView: UIView, UIKeyInput {
     override class var layerClass: AnyClass { CAMetalLayer.self }
 
@@ -281,7 +284,7 @@ final class TLUnityUIView: UIView, UIKeyInput {
         if let sys = Bundle.main.resourcePath.map({ $0 + "/android-system" }), FileManager.default.fileExists(atPath: sys) {
             husk_native_set_system_files(sys + "/cacerts", sys)
         }
-        husk_native_set_extra_fonts(CJKFonts.directory.path)
+        husk_native_set_extra_fonts(HuskFonts.directory.path)
         let started: Bool
         switch engine {
         case .sdl:
@@ -302,7 +305,11 @@ final class TLUnityUIView: UIView, UIKeyInput {
             started = husk_ue4_launch(apk, dataDir, layerPtr, Int32(width), Int32(height), angle, ca)
         case .cocos:
             // Geode, when it is on for this game and downloaded: loaded into the game after its own libraries.
-            let geode = GeodeSupport.files(appDir: (dataDir as NSString).deletingLastPathComponent)
+            // Turning it on is per-game settings, which are an iOS 15 screen; on 12.2 the game simply runs without it.
+            var geode: (zip: String, launcher: String)?
+            if #available(iOS 15.0, *) {
+                geode = GeodeSupport.files(appDir: (dataDir as NSString).deletingLastPathComponent)
+            }
             husk_cocos_set_geode(geode?.zip, geode?.launcher)
             if geode != nil { HuskLog.log("geode", "loading Geode into the game") }
             started = husk_cocos_launch(apk, dataDir, layerPtr, Int32(width), Int32(height), angle, ca)
@@ -1037,7 +1044,9 @@ struct TLCocosAttemptView: View {
 }
 
 /// How the native runtime shows an app: which engine draws it, where it keeps its data, and which way up it is.
-@available(iOS 15.0, *)
+///
+/// No availability floor of its own -- it is report data and C calls -- except on the one function that
+/// takes `TLAppSettings`, a 15.0 type.
 extension TLApp {
     /// Geometry Dash and the like are cocos2d-x; Minecraft is built on GameActivity. Both are landscape.
     var screenEngine: TLNativeEngine {
@@ -1077,21 +1086,26 @@ extension TLApp {
         }
     }
 
+    /// Which way up, for a shell that has no per-game settings: exactly what `.auto` means below.
+    func drawsPortraitByManifest() -> Bool {
+        // A Flutter app is a phone app: portrait, unless its manifest asks for landscape.
+        if screenEngine == .flutter || screenEngine == .java, let apk = apks.first { return husk_apk_orientation(apk) != 0 }
+        if screenEngine == .gamemaker, let apk = apks.first {
+            let o = husk_gamemaker_orientation(apk)
+            return o == 1 || (o < 0 && husk_sdl_apk_is_portrait(apk) != 0)
+        }
+        guard screenEngine == .sdl || screenEngine == .nativeactivity || screenEngine == .unity || screenEngine == .godot, let apk = apks.first else { return false }
+        return husk_sdl_apk_is_portrait(apk) != 0
+    }
+
     /// Which way up: what the game's settings say, and otherwise what its manifest asks. Some SDL games are portrait; every other
     /// native game is landscape.
+    @available(iOS 15.0, *)
     func drawsPortrait(_ settings: TLAppSettings) -> Bool {
         switch settings.orientation {
         case .landscape: return false
         case .portrait: return true
-        case .auto:
-            // A Flutter app is a phone app: portrait, unless its manifest asks for landscape.
-            if screenEngine == .flutter || screenEngine == .java, let apk = apks.first { return husk_apk_orientation(apk) != 0 }
-            if screenEngine == .gamemaker, let apk = apks.first {
-                let o = husk_gamemaker_orientation(apk)
-                return o == 1 || (o < 0 && husk_sdl_apk_is_portrait(apk) != 0)
-            }
-            guard screenEngine == .sdl || screenEngine == .nativeactivity || screenEngine == .unity || screenEngine == .godot, let apk = apks.first else { return false }
-            return husk_sdl_apk_is_portrait(apk) != 0
+        case .auto: return drawsPortraitByManifest()
         }
     }
 }

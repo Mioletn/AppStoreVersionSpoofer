@@ -109,8 +109,10 @@ jobs:
           - **Husk.ipa** — install with AltStore / SideStore / Sideloadly (all support iOS 12.2).
           - **Husk.tipa** — for TrollStore (TrollStore itself does not run on iOS 12; use the .ipa there).
 
-          On iOS 12.2 the app runs its UIKit shell (Library / JIT / Settings). The SwiftUI
-          interface, the native runtime (Unity, cocos2d-x, Minecraft, ...), the web-app runtime
+          On iOS 12.2 the app runs its UIKit shell (Library / JIT / Settings) and the native
+          runtime (Unity, cocos2d-x, Minecraft, SDL, Godot, GTA, GameMaker): games draw into a
+          CAMetalLayer through the ANGLE build the app carries, on the CPU path or the runtime.
+          The SwiftUI interface, web apps (Capacitor / Cordova), Unreal games (MoltenVK is iOS 15)
           and QEMU guest emulation need iOS 13/15+ and are not offered on 12.2. JIT on iOS 12
           needs a debugger attached (ios-deploy / debugserver) or a jailbreak — see the JIT tab.
 
