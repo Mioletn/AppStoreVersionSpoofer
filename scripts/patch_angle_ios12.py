@@ -180,7 +180,9 @@ RASTERIZATION_RATE_MAP_PATCH = (
     // iOS 13, and reset() calls this with nil for every encoder, so the first
     // render pass of the first frame died on an unrecognized selector. Without
     // the property there is no rate map to carry anyway.
-    id<MTLRenderPassDescriptor> desc = mCachedRenderPassDescObjC.get();
+    // MTLRenderPassDescriptor is a class, not a protocol, so the pointer is
+    // spelled out rather than wrapped in id<>.
+    MTLRenderPassDescriptor *desc = mCachedRenderPassDescObjC.get();
     if (![desc respondsToSelector:sel_registerName("rasterizationRateMap")])
     {
         return *this;
