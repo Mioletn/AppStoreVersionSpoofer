@@ -71,6 +71,33 @@ jobs:
             || /opt/homebrew/bin/python3 -m pip install --break-system-packages pyyaml
           /opt/homebrew/bin/python3 -c 'import yaml; print("pyyaml", yaml.__version__)'
 
+      - name: Restore the Java runtime payload
+        # Java apps (plain DEX apps, libGDX, Flutter) boot from java-runtime/,
+        # which comes out of the Android guest disk, not out of a compiler. It
+        # is the same for every build of the same image, so keep it.
+        uses: actions/cache@v4
+        with:
+          path: build/java-runtime
+          key: java-runtime-a8dbaecc
+
+      - name: Java runtime payload
+        # Not fatal: without it the app still builds and reports, in the library
+        # and in the log, that this build ships no Java runtime.
+        continue-on-error: true
+        run: |
+          if [ -d build/java-runtime ]; then
+            echo "java-runtime restored from cache:"; du -sh build/java-runtime
+            exit 0
+          fi
+          brew install e2fsprogs
+          IMG="$RUNNER_TEMP/vda-v12.qcow2"
+          curl -fL --retry 3 -o "$IMG" \
+            "https://github.com/Leviidev/Husk/releases/download/lineage-v2/vda-v12.qcow2"
+          echo "a8dbaecc8fdcd682991b078d6bbb7df6972e459208634fa8dcbad24f17208d6a  $IMG" \
+            | shasum -a 256 -c -
+          bash ./scripts/extract_java_runtime.sh "$IMG"
+          rm -f "$IMG"
+
       - name: Build the IPA
         run: ./scripts/ci_build.sh "$GITHUB_WORKSPACE/build/Husk.ipa"
 
