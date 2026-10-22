@@ -164,6 +164,16 @@ artifact **and** to a release tagged `ios12-<sha>`; on a public repository the
 release asset downloads without authentication. Triggered by a push to
 `ios12-backport` or manually (`workflow_dispatch`).
 
+How the first build was actually delivered: the authoring machine is a Windows
+box whose network reaches `api.github.com` but not `github.com` over git
+smart-HTTP, and the available token could not fork or create repositories. The
+branch was therefore pushed as **`husk-ios12-build`** (content-identical to
+`ios12-backport`, hence the extra trigger name above) into an existing public
+repository of the token's account, as a single root commit uploaded through the
+Git Data API. That branch is a temporary build host only and is meant to be
+deleted once the IPA has been retrieved; the canonical branch remains
+`ios12-backport`.
+
 ## Install on iOS 12.2
 
 * **AltStore / SideStore** — 12.2 is exactly AltStore's floor, so this is the

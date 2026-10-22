@@ -33,6 +33,29 @@ fi
 
 cd "$WK/Source/ThirdParty/ANGLE"
 
+# Xcode 16.4's clang (the toolchain the iOS 12.2 backport must use -- see
+# .github/workflows/build-ipa.yml) rejects ANGLE's thread-safety capability
+# annotations: std::mutex cannot carry the 'capability' attribute, so every
+# ANGLE_ACQUIRE_CAPABILITY(mutex) / ANGLE_RELEASE_CAPABILITY(mutex) use --
+# SimpleMutex.h's MutexOnStd::lock/unlock -- fails under ANGLE's -Werror with
+# "'acquire_capability' attribute requires arguments whose type is annotated
+# with 'capability' attribute; type here is 'std::mutex'". The annotations are
+# static analysis only: emptying the macros compiles identical code, which is
+# the direction upstream ANGLE moved in anyway. WebKit HEAD is cloned fresh on
+# every build, so patch by content rather than line number and stay idempotent;
+# the -Wno-thread-safety* flags in angle_build() are the second layer in case
+# another annotation use surfaces first. (sed writes to a temp file and mv,
+# rather than -i, so the same line works under both BSD and GNU sed.)
+if grep -q '^#if defined(__clang__) && __has_attribute(acquire_capability)$' \
+        src/common/angleutils.h; then
+    sed 's|^#if defined(__clang__) && __has_attribute(acquire_capability)$|#if 0  /* husk: std::mutex cannot carry capability annotations (Xcode 16.4 clang) */|' \
+        src/common/angleutils.h > src/common/angleutils.h.tmp
+    mv src/common/angleutils.h.tmp src/common/angleutils.h
+    echo "==> patched ANGLE thread-safety annotations (angleutils.h)"
+else
+    echo "==> ANGLE thread-safety annotations already neutralized"
+fi
+
 # Two overrides worth explaining.
 #
 # WK_AVAILABILITY_OVERLAY_FLAGS points at a clang VFS overlay that WebKit
@@ -77,8 +100,8 @@ angle_build () {
         # does, and it is iOS 15+ on this backport, so ANGLE_MINVER=15.5 is a
         # documented fallback (ci_build.sh uses it if the 12.2 build fails).
         IPHONEOS_DEPLOYMENT_TARGET="${ANGLE_MINVER:-12.2}" \
-        OTHER_CFLAGS='$(inherited) -Wno-unguarded-availability-new' \
-        OTHER_CPLUSPLUSFLAGS='$(inherited) -Wno-unguarded-availability-new' \
+        OTHER_CFLAGS='$(inherited) -Wno-unguarded-availability-new -Wno-thread-safety -Wno-thread-safety-attributes -Wno-thread-safety-analysis' \
+        OTHER_CPLUSPLUSFLAGS='$(inherited) -Wno-unguarded-availability-new -Wno-thread-safety -Wno-thread-safety-attributes -Wno-thread-safety-analysis' \
         ${ldflags[@]+"${ldflags[@]}"} \
         > "$LOG" 2>&1 \
       || { echo "ANGLE build failed; last errors:" >&2
