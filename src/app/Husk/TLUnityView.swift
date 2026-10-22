@@ -376,10 +376,12 @@ final class TLUnityUIView: UIView, UIKeyInput {
         done.titleLabel?.font = .systemFont(ofSize: 17, weight: .semibold)
         done.frame = CGRect(x: 100, y: 0, width: 80, height: 44)
         done.autoresizingMask = [.flexibleLeftMargin]
-        done.addAction(UIAction { [weak self] _ in self?.finishTyping() }, for: .touchUpInside)
+        done.addTarget(self, action: #selector(doneTypingTapped), for: .touchUpInside)
         bar.addSubview(done)
         return bar
     }()
+    /// `addAction(_:for:)` is iOS 14; a target is iOS 2 and does the same here.
+    @objc private func doneTypingTapped() { finishTyping() }
     override var inputAccessoryView: UIView? { engine == .cocos || engine == .sdl || engine == .minecraft || engine == .unity ? keyboardBar : nil }
 
     func insertText(_ text: String) {
@@ -507,22 +509,32 @@ final class TLUnityUIView: UIView, UIKeyInput {
             HuskLog.log("tl", "java: the app asks for orientation \(orientation)")
         })
         husk_java_set_document_picker { mimeTypes, multiple in
-            let types = TLUnityUIView.contentTypes(mimeTypes.map { String(cString: $0) } ?? "*/*")
+            let mimes = mimeTypes.map { String(cString: $0) } ?? "*/*"
+            // Copies in a folder of their own: the app reads them by path, long after the picker's access ends.
+            let picked: ([URL]) -> Void = { urls in
+                let dir = FileManager.default.temporaryDirectory.appendingPathComponent("picked/\(UUID().uuidString)", isDirectory: true)
+                try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                var paths: [String] = []
+                for url in urls {
+                    let scoped = url.startAccessingSecurityScopedResource()
+                    defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                    let dest = dir.appendingPathComponent(url.lastPathComponent)
+                    do { try FileManager.default.copyItem(at: url, to: dest); paths.append(dest.path) }
+                    catch { HuskLog.log("tl", "java: could not copy the picked \(url.lastPathComponent): \(error.localizedDescription)") }
+                }
+                TLUnityUIView.answerDocumentPicker(paths)
+            }
+            let cancelled: () -> Void = { TLUnityUIView.answerDocumentPicker([]) }
             DispatchQueue.main.async {
-                HuskFilePicker.present(types: types, multiple: multiple != 0, onPick: { urls in
-                    // copies in a folder of their own: the app reads them by path, long after the picker's access ends
-                    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("picked/\(UUID().uuidString)", isDirectory: true)
-                    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-                    var paths: [String] = []
-                    for url in urls {
-                        let scoped = url.startAccessingSecurityScopedResource()
-                        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-                        let dest = dir.appendingPathComponent(url.lastPathComponent)
-                        do { try FileManager.default.copyItem(at: url, to: dest); paths.append(dest.path) }
-                        catch { HuskLog.log("tl", "java: could not copy the picked \(url.lastPathComponent): \(error.localizedDescription)") }
-                    }
-                    TLUnityUIView.answerDocumentPicker(paths)
-                }, onCancel: { TLUnityUIView.answerDocumentPicker([]) })
+                // HuskFilePicker is the UTType picker (15); below that the shell
+                // uses the iOS 8 `documentTypes:` spelling, same copy-and-answer.
+                if #available(iOS 15.0, *) {
+                    HuskFilePicker.present(types: TLUnityUIView.contentTypes(mimes), multiple: multiple != 0,
+                                           onPick: picked, onCancel: cancelled)
+                } else {
+                    LegacyDocumentPicker.present(mimeTypes: mimes, multiple: multiple != 0,
+                                                 onPick: picked, onCancel: cancelled)
+                }
             }
         }
     }
@@ -536,6 +548,8 @@ final class TLUnityUIView: UIView, UIKeyInput {
     }
 
     /// The document types for an intent's MIME types ("image/*,application/pdf"); anything unknown opens the picker to all files.
+    /// `UTType` is iOS 14, and this is only reached from inside the 15 branch above.
+    @available(iOS 14.0, *)
     private static func contentTypes(_ mimeTypes: String) -> [UTType] {
         var types: [UTType] = []
         for m in mimeTypes.split(separator: ",").map({ $0.trimmingCharacters(in: .whitespaces).lowercased() }) {

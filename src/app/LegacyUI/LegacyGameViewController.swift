@@ -39,6 +39,24 @@ final class LegacyGameViewController: UIViewController {
 
     override var prefersStatusBarHidden: Bool { true }
 
+    /// A landscape game in a portrait-first shell: the delegate's mask is the
+    /// only place this app consults (nothing in the shell overrides it), so
+    /// setting it here is what turns the screen -- the same call upstream's
+    /// game screen makes when it appears.
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        guard app.report?.nativeEngine != nil else { return }
+        HuskOrientation.set(app.drawsPortraitByManifest() ? .portrait : .landscape)
+        UIApplication.shared.isIdleTimerDisabled = true
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        guard app.report?.nativeEngine != nil else { return }
+        UIApplication.shared.isIdleTimerDisabled = false
+        HuskOrientation.set(HuskOrientation.standard)
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black
