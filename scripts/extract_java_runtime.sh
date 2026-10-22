@@ -135,40 +135,81 @@ assert found, 'no system logical partition'
 print('    system.img written: %d bytes' % os.path.getsize(out))
 EOF
 
-dump_file() {  # dump_file <path-in-image> <out>
-    "$DEBUGFS" -R "dump $1 $2" "$WORK/system.img" >/dev/null 2>&1
-    [ -s "$2" ] || { echo "could not dump $1 from system.img" >&2; exit 1; }
+# Android moved its tree from /system/... to the partition's root between
+# releases (system-as-root), and this image and the one next to it disagree, so
+# every path is looked up in both shapes instead of trusting one.
+in_image() {
+    "$DEBUGFS" -R "stat $1" "$WORK/system.img" 2>/dev/null | grep -q 'Inode:'
+}
+
+resolve() {  # resolve <path relative to Android's root> -> path inside the image
+    local rel="$1" p
+    for p in "/system/$rel" "/$rel"; do
+        if in_image "$p"; then echo "$p"; return 0; fi
+    done
+    echo "nothing at /system/$rel or /$rel in system.img" >&2
+    echo "  root holds: $("$DEBUGFS" -R "ls -l /" "$WORK/system.img" 2>&1 | head -20 | tr '\n' ' ')" >&2
+    return 1
+}
+
+dump_file() {  # dump_file <path relative to Android's root> <out>
+    local path
+    path="$(resolve "$1")" || exit 1
+    "$DEBUGFS" -R "dump $path $2" "$WORK/system.img" >/dev/null 2>&1
+    [ -s "$2" ] || {
+        echo "could not dump $path from system.img" >&2
+        "$DEBUGFS" -R "stat $path" "$WORK/system.img" >&2 || true
+        exit 1
+    }
+}
+
+flatten() {  # flatten <dir> <name> -- move <dir>/<name>/* up into <dir>
+    local dir="$1" nested="$1/$2"
+    [ -d "$nested" ] || return 0
+    mv "$nested"/* "$dir"/ 2>/dev/null || true
+    rm -rf "$nested"
 }
 
 echo "==> platform: resources and HttpClient"
-dump_file /framework/framework-res.apk "$WORK/framework-res.apk"
-dump_file /framework/org.apache.http.legacy.jar "$WORK/org.apache.http.legacy.jar"
+dump_file framework/framework-res.apk "$WORK/framework-res.apk"
+dump_file framework/org.apache.http.legacy.jar "$WORK/org.apache.http.legacy.jar"
 
 echo "==> APEX payloads"
+APEX_DIR="$(resolve apex)" || exit 1
 mkdir -p "$WORK/apex"
-"$DEBUGFS" -R "rdump /apex $WORK/apex" "$WORK/system.img" >/dev/null 2>&1 || true
-ls "$WORK/apex" >/dev/null 2>&1 || { echo "could not list /apex" >&2; exit 1; }
+"$DEBUGFS" -R "rdump $APEX_DIR $WORK/apex" "$WORK/system.img" >/dev/null 2>&1 || true
+# rdump puts the source directory's own name under the destination, so the files
+# arrive one level deep; everything below reads them flat.
+flatten "$WORK/apex" apex
+ls "$WORK/apex" >/dev/null 2>&1 || { echo "could not list $APEX_DIR" >&2; exit 1; }
 
 # One APEX at a time: unzip its payload image, then take the directories that
 # carry what the runtime loads.
-apex() {  # apex <name> -> $WORK/<name>/payload.img
-    local name="$1"
-    local zip="$WORK/apex/$name.apex"
-    if [ ! -f "$zip" ]; then
-        # Newer images carry the compressed form; nothing here reads it yet.
-        [ -f "$zip.capex" ] && { echo "$name is a compressed APEX (.capex)" >&2; exit 1; }
-        echo "no $name.apex in the image (have: $(ls "$WORK/apex" | tr '\n' ' '))" >&2
-        exit 1
-    fi
+apex() {  # apex <name> -> $WORK/<name>/apex_payload.img
+    local name="$1" zip="$WORK/apex/$1.apex" payload
     mkdir -p "$WORK/$name"
+    if [ ! -f "$zip" ]; then
+        # Images built with compressed APEXes carry <name>.capex, which is a zip
+        # holding "original_apex" -- the plain APEX -- alongside its manifest.
+        if [ -f "$WORK/apex/$name.capex" ]; then
+            unzip -o -q "$WORK/apex/$name.capex" original_apex -d "$WORK/$name" \
+                || { echo "$name.capex holds no original_apex" >&2; exit 1; }
+            zip="$WORK/$name/original_apex"
+        else
+            echo "no $name.apex or $name.capex in the image (have: $(ls "$WORK/apex" | tr '\n' ' '))" >&2
+            exit 1
+        fi
+    fi
+    payload="$WORK/$name/apex_payload.img"
     unzip -o -q "$zip" apex_payload.img -d "$WORK/$name" \
-        || { echo "$name.apex holds no apex_payload.img" >&2; exit 1; }
-    echo "$WORK/$name/apex_payload.img"
+        || { echo "$(basename "$zip") holds no apex_payload.img" >&2; exit 1; }
+    echo "$payload"
 }
 
 apex_rdump() {  # apex_rdump <payload.img> <dir-in-payload> <out-dir>
     mkdir -p "$3"
     "$DEBUGFS" -R "rdump $2 $3" "$1" >/dev/null 2>&1 || true
+    flatten "$3" "$(basename "$2")"
 }
 
 copy() {  # copy <from> <to-relative-in-java-runtime>

@@ -7,12 +7,33 @@ DL="$HUSK_ROOT/third_party/sources"
 SRC="$HUSK_ROOT/third_party/build"
 mkdir -p "$DL" "$SRC"
 
+# ftp.gnu.org times out from some runners -- the connect hangs rather than
+# refusing, so --retry never gets a second chance at a different host. A GNU
+# tarball is therefore tried against the mirror pool before the build gives up on
+# it; a run that cannot reach the origin costs two connect timeouts, not a build.
+gnu_mirrors() {
+    case "$1" in
+        https://ftp.gnu.org/gnu/*)
+            printf '%s\n%s\n' "${1/ftp.gnu.org\/gnu/ftpmirror.gnu.org}" \
+                              "${1/ftp.gnu.org\/gnu/mirrors.kernel.org\/gnu}" ;;
+    esac
+}
+
 fetch() {
-    local url="$1" file="$DL/$(basename "$1")"
+    local url="$1" file="$DL/$(basename "$1")" alt
     if [ -s "$file" ]; then echo "[skip] $(basename "$file")"; return 0; fi
     echo "[get ] $(basename "$file")"
-    curl -fL --retry 3 --retry-delay 5 -o "$file.part" "$url" || { echo "[FAIL] $url"; return 1; }
-    mv "$file.part" "$file"
+    for alt in "$url" $(gnu_mirrors "$url"); do
+        if curl -fL --retry 2 --retry-delay 5 --connect-timeout 25 --max-time 900 \
+                -o "$file.part" "$alt"; then
+            mv "$file.part" "$file"
+            return 0
+        fi
+        echo "[retry] $alt"
+    done
+    rm -f "$file.part"
+    echo "[FAIL] $url"
+    return 1
 }
 
 unpack() {
