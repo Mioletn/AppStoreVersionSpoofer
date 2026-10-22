@@ -6,7 +6,7 @@ options:
     # oldest iOS a sideloader install can reach. Upstream shipped 15.5, so the
     # SwiftUI screens use iOS 15 APIs without guards: they carry
     # @available(iOS 15.0, *) and run on iOS 15 and later, while iOS 12.2-14.4
-    # runs the UIKit shell in ../LegacyUI instead of them (HuskApp.swift picks).
+    # runs the UIKit shell in LegacyUI instead of them (HuskApp.swift picks).
     # Compat15.swift still stands in for the iOS 16 SwiftUI the screens use.
     #
     # Build with Xcode 16.4 (Swift 6.1), NOT Xcode 26: binaries produced by
@@ -61,8 +61,10 @@ targets:
       - path: HuskJITHelper/HuskJITMessages.swift
       # The iOS 12.2 backport's UIKit shell: on iOS 12 the app delegate shows
       # LegacyRootViewController instead of ContentView (see HuskApp.swift).
-      # These files are deliberately SwiftUI-free and Combine-free.
-      - path: ../LegacyUI
+      # These files are deliberately SwiftUI-free and Combine-free. Relative to
+      # this spec (src/app), which is where the shell lives -- xcodegen fails
+      # spec validation outright when a source directory does not exist.
+      - path: LegacyUI
       # The download Live Activity's attributes, shared with the widget that draws it.
       - path: Shared
     settings:
