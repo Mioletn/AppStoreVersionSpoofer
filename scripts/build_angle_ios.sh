@@ -56,6 +56,11 @@ else
     echo "==> ANGLE thread-safety annotations already neutralized"
 fi
 
+# The Metal backend's capability probes, for 12.2 (patch_angle_ios12.py explains
+# what each one is and why it aborts the process when it is not guarded).
+echo "==> patching ANGLE's Metal capability probes for iOS 12.2"
+python3 "$HUSK_ROOT/scripts/patch_angle_ios12.py" "$PWD"
+
 # Two overrides worth explaining.
 #
 # WK_AVAILABILITY_OVERLAY_FLAGS points at a clang VFS overlay that WebKit

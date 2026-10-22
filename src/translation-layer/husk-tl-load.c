@@ -1959,6 +1959,18 @@ char *husk_tl_attempt_log(void)
     return out;
 }
 
+void husk_tl_note(const char *text)
+{
+    /* For a caller outside this tree that has something worth putting in front of
+     * the person watching the run: Swift's uncaught-exception handler. That
+     * handler writes to Husk's own log, which is a different screen, so an
+     * exception thrown on a runtime thread ended the run with the console
+     * showing nothing after the last loader line. */
+    if (text) {
+        tl_log_line("%s", text);
+    }
+}
+
 int husk_tl_attempt_frames(void)
 {
     pthread_mutex_lock(&g_run.frame_mutex);

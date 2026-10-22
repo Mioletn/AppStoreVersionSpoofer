@@ -73,6 +73,13 @@ int  husk_tl_attempt_start(const char *const *apks, int count, int seconds);
 bool husk_tl_attempt_done(int *exit_code);
 int  husk_tl_attempt_frames(void);
 char *husk_tl_attempt_log(void);
+/*
+ * Put one line in that same log from outside the tree. Swift's uncaught
+ * exception handler uses it: the run screen reads this log, not Husk's own,
+ * so an exception on a runtime thread would otherwise end a run in silence --
+ * which is exactly how the ANGLE Metal probe abort looked.
+ */
+void husk_tl_note(const char *text);
 void husk_tl_attempt_stop(void);
 void husk_tl_attempt_reset(void);
 

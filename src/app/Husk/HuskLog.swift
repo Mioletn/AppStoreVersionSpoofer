@@ -280,8 +280,17 @@ enum HuskLog {
             }
         }
         NSSetUncaughtExceptionHandler { ex in
+            let summary = "crash: uncaught \(ex.name.rawValue) -- \(ex.reason ?? "no reason")"
             HuskLog.log("crash", "uncaught exception: \(ex.name.rawValue) -- \(ex.reason ?? "")")
             HuskLog.log("crash", ex.callStackSymbols.prefix(20).joined(separator: " | "))
+            // Also into the run log the game screen shows: this log is a
+            // different screen, and an exception thrown on a runtime thread
+            // would otherwise end the run with the console saying nothing after
+            // the last loader line (which is how the ANGLE Metal abort read).
+            husk_tl_note(summary)
+            for line in ex.callStackSymbols.prefix(12) {
+                husk_tl_note("crash: " + line)
+            }
             HuskLog.flushNow()
         }
         log("boot", "crash handlers installed (SEGV/ABRT/ILL/FPE/SYS; "
