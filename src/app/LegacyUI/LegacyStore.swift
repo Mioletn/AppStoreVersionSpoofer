@@ -43,12 +43,19 @@ final class LegacyStore {
         // AndroidManifest.xml is not an Android app -- a build that filed an .ipa
         // here left exactly such a row -- and offering it would only ever end in
         // "could not execute", so it is left out of the list.
-        let names = files.filter { name in
-            guard name.lowercased().hasSuffix(".apk") else { return false }
-            return husk_tl_has_entry(dir.appendingPathComponent(name).path,
-                                     "AndroidManifest.xml") != 0
+        let names = files.filter { $0.lowercased().hasSuffix(".apk") }
+        let usable = names.filter {
+            husk_tl_has_entry(dir.appendingPathComponent($0).path,
+                              "AndroidManifest.xml") != 0
         }
-        let apks = names
+        if usable.isEmpty, !names.isEmpty {
+            // Worth a line: the folder stays on disk (58 MB of it, for an .ipa)
+            // and nothing else would explain why it is not in the library.
+            HuskLog.log("tl", "legacy: hiding \(dir.lastPathComponent): it holds no Android "
+                              + "package (\(names.joined(separator: ", ")))")
+            return nil
+        }
+        let apks = usable
             .sorted { a, b in
                 let ra = BundleUnpacker.rank(a, siblings: names)
                 let rb = BundleUnpacker.rank(b, siblings: names)
@@ -108,23 +115,40 @@ final class LegacyStore {
 
     // MARK: what this iOS can run
 
+    /// Whether this build carries the Java runtime payload (build/java-runtime,
+    /// which scripts/build_java_runtime.sh produces and package_ipa.sh copies
+    /// into the app). CI does not build it, so a Java app here has no boot class
+    /// path to start from: every jar is missing, and the attempt ends in
+    /// "no java/lang/Object on the boot class path". Checked once, at first use,
+    /// because the answer is a property of the bundle on disk.
+    static let shipsJavaRuntime: Bool = {
+        FileManager.default.fileExists(
+            atPath: (Bundle.main.resourcePath ?? "")
+                + "/java-runtime/com.android.art/javalib/core-oj.jar")
+    }()
+
     /// Whether the app runs on the iOS 12 path at all.
     ///
     /// The native runtime (Unity, cocos2d-x, Minecraft, SDL, Unreal, Godot,
-    /// GTA, GameMaker, the Java runtime, Flutter) presents into a CAMetalLayer.
-    /// That layer is iOS 8, and it is handed straight to the ANGLE build this
-    /// app carries, so the runtime runs here -- this used to say iOS 13 and it
-    /// was wrong: 13 is where the SwiftUI screens around it start, not the
-    /// layer. Web apps are the ones that cannot run: the bridge they talk to
-    /// lives in the iOS 15 UI layer.
+    /// GTA, GameMaker, Flutter) presents into a CAMetalLayer. That layer is
+    /// iOS 8, and it is handed straight to the ANGLE build this app carries, so
+    /// the runtime runs here -- this used to say iOS 13 and it was wrong: 13 is
+    /// where the SwiftUI screens around it start, not the layer. Web apps are
+    /// the ones that cannot run: the bridge they talk to lives in the iOS 15 UI
+    /// layer.
     func canRunOnThisiOS(_ app: TLApp) -> Bool {
-        app.report?.webKind == nil
+        unavailableReason(app) == nil
     }
 
     /// Why it cannot run here, in words for the library cell.
     func unavailableReason(_ app: TLApp) -> String? {
         if app.report?.webKind != nil {
             return "Needs iOS 15 (web apps run on the WKWebView bridge)"
+        }
+        // An app with no native libraries at all runs on the Java runtime, and
+        // this build has none -- see shipsJavaRuntime.
+        if app.report?.nativeEngine == .java, !Self.shipsJavaRuntime {
+            return "Needs the Java runtime, which this build does not include"
         }
         return nil
     }

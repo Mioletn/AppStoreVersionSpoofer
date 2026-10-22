@@ -264,6 +264,17 @@ static void *java_boot(void *arg)
     snprintf(paths[nb], sizeof(paths[nb]), "%s/husk-framework.dex", r); boot[nb] = paths[nb]; nb++;
     /* Apache HttpClient, which Android gives apps that target 27 or lower (or ask for it in their manifest) */
     snprintf(paths[nb], sizeof(paths[nb]), "%s/org.apache.http.legacy.jar", r); boot[nb] = paths[nb]; nb++;
+    /* A build that did not run scripts/build_java_runtime.sh carries no payload at
+     * all. Say that once: otherwise the boot class path reports each of the nine
+     * entries in turn ("No such file or directory"), and the last line the user
+     * reads -- "no java/lang/Object on the boot class path" -- names a symptom
+     * rather than the missing folder. */
+    if (access(paths[0], R_OK) != 0) {
+        tl_log_line("java: this build ships no Java runtime (%s is missing)", paths[0]);
+        tl_log_line("java: Java apps need build/java-runtime -- see scripts/build_java_runtime.sh");
+        *ok = false;
+        return NULL;
+    }
     char v[1200];
     snprintf(v, sizeof(v), "%s/com.android.art", r); setenv("ANDROID_ART_ROOT", v, 1);
     snprintf(v, sizeof(v), "%s/com.android.i18n", r); setenv("ANDROID_I18N_ROOT", v, 1);
