@@ -760,6 +760,12 @@ private enum Live {
 
 /// The download as a continued processing task (iOS 26): the system keeps Husk running in the background for it and shows its
 /// progress in the Dynamic Island and on the Lock Screen.
+///
+/// Guarded on the compiler rather than on `#available`: the types it uses do not
+/// exist in the iOS 18.5 SDK that Xcode 16.4 ships, so on this toolchain the
+/// feature cannot be referenced at all. Xcode 26 builds the real one, and the
+/// per-call `if #available(iOS 26.0, *)` in the callers still decides at runtime.
+#if compiler(>=6.2)
 @available(iOS 26.0, *)
 @MainActor
 enum ContinuedDownload {
@@ -852,6 +858,21 @@ enum ContinuedDownload {
         return true
     }
 }
+#else
+/// No continued processing task in this toolchain (see above). Downloads use the
+/// audio keep-alive below, which is what actually runs for a sideloaded copy
+/// anyway -- the system refuses the real task because the bundle ID no longer
+/// matches the identifiers in Info.plist.
+@available(iOS 26.0, *)
+@MainActor
+enum ContinuedDownload {
+    static var running: Bool { false }
+    static var active: Bool { false }
+    static func begin(title: String) {}
+    @discardableResult
+    static func update(jobs: [Downloads.Job], speed: Double) -> Bool { false }
+}
+#endif
 
 /// Keeps Husk running in the background while downloads are active, by playing silence: iOS lets an app that is playing audio keep
 /// running, so Husk goes on downloading at full speed and its Live Activity stays current. It mixes with other audio (music keeps

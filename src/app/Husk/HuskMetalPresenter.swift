@@ -209,6 +209,7 @@ final class HuskMetalPresenter {
 
 /// The C entry point QEMU calls. No captures, so it can be a plain function
 /// pointer; everything it needs hangs off the shared presenter.
+@available(iOS 15.0, *)
 private let huskMetalPresent: husk_metal_present_fn = { texture, flip, _, _ in
     guard let texture else { return }
     let mtl = Unmanaged<AnyObject>.fromOpaque(texture).takeUnretainedValue()
@@ -220,6 +221,7 @@ private let huskMetalPresent: husk_metal_present_fn = { texture, flip, _, _ in
     HuskMetalPresenter.shared.present(texture: tex, flip: flip != 0)
 }
 
+@available(iOS 15.0, *)
 func huskInstallMetalPresenter() {
     husk_display_gl_set_metal_presenter(huskMetalPresent)
 }

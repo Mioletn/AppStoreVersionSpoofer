@@ -90,7 +90,7 @@ final class TLUnityUIView: UIView, UIKeyInput {
         threeFingers.delaysTouchesEnded = false
         addGestureRecognizer(threeFingers)
 
-        stats.font = .monospacedSystemFont(ofSize: 10, weight: .medium)
+        stats.font = huskMonospacedFont(ofSize: 10, weight: .medium)
         stats.textColor = .white
         stats.backgroundColor = UIColor.black.withAlphaComponent(0.55)
         stats.layer.cornerRadius = 4

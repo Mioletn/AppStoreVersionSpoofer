@@ -102,7 +102,7 @@ final class LegacySettingsViewController: UIViewController {
         let text = UITextView()
         text.backgroundColor = .black
         text.textColor = UIColor(red: 0.85, green: 0.9, blue: 0.85, alpha: 1)
-        text.font = UIFont.monospacedSystemFont(ofSize: 10, weight: .regular)
+        text.font = huskMonospacedFont(ofSize: 10, weight: .regular)
         text.isEditable = false
         text.text = HuskLog.recentLines(2000).joined(separator: "\n")
         text.translatesAutoresizingMaskIntoConstraints = false

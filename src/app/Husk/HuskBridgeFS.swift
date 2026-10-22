@@ -487,7 +487,7 @@ final class GuestBridge {
         guard size > 0 else { throw BridgeError.io("\(local.lastPathComponent) is empty") }
 
         let handle = try FileHandle(forReadingFrom: local)
-        defer { try? handle.close() }
+        defer { try? handle.huskClose() }
 
         // On the held connection, like everything else.
         //
@@ -525,7 +525,7 @@ final class GuestBridge {
 
         var sent = 0
         while sent < size {
-            guard let chunk = try handle.read(upToCount: 256 * 1024), !chunk.isEmpty else { break }
+            guard let chunk = try handle.huskRead(upToCount: 256 * 1024), !chunk.isEmpty else { break }
             try writeAll(fd, chunk)
             sent += chunk.count
             progress(Double(sent) / Double(size))
@@ -1164,13 +1164,18 @@ final class AndroidHost: ObservableObject {
         } }
         guard !safe.isEmpty else { return }
 
-        let script = "for p in " + safe.joined(separator: " ") + "; do "
-                   + "echo \"#P $p\"; "
-                   + "dumpsys package \"$p\" 2>/dev/null | grep -E "
-                   + "\"versionName=|primaryCpuAbi=|categoryHint=|appCategory=\" | head -8; "
-                   + "echo \"#K\"; "
-                   + "pm path \"$p\" 2>/dev/null | sed 's/^package://' | "
-                   + "while read a; do stat -c %s \"$a\" 2>/dev/null; done; done"
+        // Joined from an array rather than chained with `+`: the Swift 6.1 type
+        // checker gives up on a chain of interpolated literals this long
+        // ("unable to type-check this expression in reasonable time").
+        let script = [
+            "for p in " + safe.joined(separator: " ") + "; do ",
+            "echo \"#P $p\"; ",
+            "dumpsys package \"$p\" 2>/dev/null | grep -E ",
+            "\"versionName=|primaryCpuAbi=|categoryHint=|appCategory=\" | head -8; ",
+            "echo \"#K\"; ",
+            "pm path \"$p\" 2>/dev/null | sed 's/^package://' | ",
+            "while read a; do stat -c %s \"$a\" 2>/dev/null; done; done",
+        ].joined()
 
         guard let text = try? GuestBridge.shared.shell(script, timeout: 180) else {
             HuskLog.log("bridge", "could not read app details")
@@ -1181,7 +1186,9 @@ final class AndroidHost: ObservableObject {
         var current: String?
         var inSizes = false
         for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
-            let line = raw.trimmingCharacters(in: .whitespaces)
+            // text.split yields Substring, and trimmingCharacters(in:) is a
+            // String method.
+            let line = String(raw).trimmingCharacters(in: .whitespaces)
             if line.hasPrefix("#P ") {
                 current = String(line.dropFirst(3))
                 inSizes = false

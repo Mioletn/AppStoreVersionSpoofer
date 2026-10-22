@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 import Foundation
-import CryptoKit
 
 /// What the release says the guest should be, and whether what is installed
 /// matches it.
@@ -152,7 +151,9 @@ enum GuestUpdate: Equatable {
 /// The snapshot is appended part by part and the system image arrives in one
 /// piece, and neither is worth a second full pass over the file on a phone.
 final class DigestWriter {
-    private var hasher = SHA256()
+    // CryptoKit's SHA256 is iOS 13+; HuskSHA256 is CommonCrypto with the same
+    // two calls (IOS12Compat.swift).
+    private var hasher = HuskSHA256()
 
     func update(_ data: Data) { hasher.update(data: data) }
 
@@ -164,9 +165,9 @@ final class DigestWriter {
     /// Digest a file that is already on disk, in chunks.
     static func ofFile(at path: String) -> String? {
         guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
-        defer { try? handle.close() }
+        defer { try? handle.huskClose() }
         let writer = DigestWriter()
-        while let chunk = try? handle.read(upToCount: 4 << 20), !chunk.isEmpty {
+        while let chunk = try? handle.huskRead(upToCount: 4 << 20), !chunk.isEmpty {
             writer.update(chunk)
         }
         return writer.finish()

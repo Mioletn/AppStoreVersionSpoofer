@@ -474,6 +474,7 @@ final class WebAppRuntime: NSObject {
 
 // MARK: - WebKit plumbing
 
+@available(iOS 15.0, *)
 extension WebAppRuntime: WKScriptMessageHandler {
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
         MainActor.assumeIsolated {

@@ -50,7 +50,7 @@ enum LegacyUI {
         let l = UILabel()
         l.text = text
         l.font = UIFont.systemFont(ofSize: size)
-        l.textColor = text
+        l.textColor = LegacyUI.text    // the parameter shadows the colour
         l.numberOfLines = 0
         l.translatesAutoresizingMaskIntoConstraints = false
         return l
@@ -67,8 +67,8 @@ enum LegacyUI {
     static func mono(_ text: String, _ size: CGFloat = 12) -> UILabel {
         let l = UILabel()
         l.text = text
-        l.font = UIFont.monospacedSystemFont(ofSize: size, weight: .regular)
-        l.textColor = text
+        l.font = huskMonospacedFont(ofSize: size, weight: .regular)
+        l.textColor = LegacyUI.text    // the parameter shadows the colour
         l.numberOfLines = 0
         l.translatesAutoresizingMaskIntoConstraints = false
         return l

@@ -3,6 +3,7 @@ import SwiftUI
 import UIKit
 import WebKit
 
+@available(iOS 15.0, *)
 extension WebAppRuntime {
     /// A web app closed itself; the object is the app's id.
     static let closed = Notification.Name("husk.web.closed")

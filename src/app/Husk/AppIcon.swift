@@ -32,6 +32,11 @@ final class IconCache: @unchecked Sendable {
     /// Already decoded at this size: drawn at once, with no fade.
     func cached(_ path: String, pixels: Int) -> UIImage? { cache.object(forKey: key(path, pixels)) }
 
+    /// Only the SwiftUI grid (iOS 15+) loads asynchronously; the legacy shell
+    /// draws its icons through `cached`, so the async path is the one that needs
+    /// availability. Swift concurrency itself is iOS 13+, hence the annotation
+    /// rather than a rewrite.
+    @available(iOS 15.0, *)
     func load(_ path: String, pixels: Int) async -> UIImage? {
         let k = key(path, pixels)
         if let hit = cache.object(forKey: k) { return hit }

@@ -618,6 +618,8 @@ final class GuestImage: ObservableObject {
     fileprivate func finishedSnapshot(tempURL: URL, digest: String?) {
         state = .installing
         HuskLog.log("guest", "unpacking snapshot (about 4 GB once expanded)")
+        // Read on the main actor; the queue below cannot touch it.
+        let pins = snapshotPinsToRecord
         DispatchQueue.global(qos: .userInitiated).async {
             let dest = URL(fileURLWithPath: self.userdataPath)
             do {
@@ -632,7 +634,7 @@ final class GuestImage: ObservableObject {
                     try? digest.write(toFile: self.snapshotDigestPath,
                                       atomically: true, encoding: .utf8)
                 }
-                self.recordSnapshotPins()
+                self.recordSnapshotPins(pins)
                 let size = (try? FileManager.default
                     .attributesOfItem(atPath: dest.path)[.size] as? Int) ?? 0
                 HuskLog.log("guest", "snapshot ready (\(size ?? 0) bytes); "
@@ -657,6 +659,8 @@ final class GuestImage: ObservableObject {
         HuskLog.log("guest", "downloading pre-booted snapshot (about 2 GB, "
                            + "\(Self.snapshotPartCount) parts)")
         let expected = manifest?.snapshot.sha256
+        // Read here, on the main actor: the completion below runs elsewhere.
+        let pins = snapshotPinsToRecord
         fetcher = SnapshotFetcher(
             urls: manifest?.partURLs ?? Self.snapshotPartURLs,
             progress: { [weak self] got, total in
@@ -688,7 +692,7 @@ final class GuestImage: ObservableObject {
                                               atomically: true, encoding: .utf8)
                     try Self.userdataSeedVersion.write(toFile: self.userdataPath + ".seed",
                                                        atomically: true, encoding: .utf8)
-                    self.recordSnapshotPins()
+                    self.recordSnapshotPins(pins)
                     let size = (try? FileManager.default
                         .attributesOfItem(atPath: dest.path)[.size] as? Int) ?? 0
                     HuskLog.log("guest", "snapshot unpacked (\(size ?? 0) bytes)")
@@ -737,8 +741,11 @@ final class GuestImage: ObservableObject {
     /// QEMU refuses a restore whose RAM differs by a byte ("Size mismatch:
     /// huskram"), so these have to describe the snapshot on disk rather than
     /// whatever this build of the app happens to prefer.
-    nonisolated fileprivate func recordSnapshotPins() {
-        guard let snap = snapshotPinsToRecord else { return }
+    /// Takes the pins as an argument because both callers run off the main
+    /// actor, where the stored property cannot be read: each captures it before
+    /// handing the work to a background queue.
+    nonisolated fileprivate func recordSnapshotPins(_ snap: GuestManifest.Snapshot?) {
+        guard let snap else { return }
         var json: [String: Any] = ["guestMiB": snap.guestMiB,
                                    "xres": snap.xres, "yres": snap.yres]
         if let smp = snap.smp { json["smp"] = smp }

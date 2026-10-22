@@ -160,19 +160,19 @@ private final class ZipWriter {
         out = try FileHandle(forWritingTo: url)
     }
 
-    func add(_ name: String, data: Data) throws { try write(name, size: UInt64(data.count), crc: crc32(0, data)) { try self.out.write(contentsOf: data) } }
+    func add(_ name: String, data: Data) throws { try write(name, size: UInt64(data.count), crc: crc32(0, data)) { try self.out.huskWrite(contentsOf: data) } }
 
     func add(_ name: String, file: URL) throws {
         let input = try FileHandle(forReadingFrom: file)
-        defer { try? input.close() }
+        defer { try? input.huskClose() }
         var crc: UInt32 = 0, size: UInt64 = 0
-        while let chunk = try input.read(upToCount: 1 << 20), !chunk.isEmpty { crc = crc32(crc, chunk); size += UInt64(chunk.count) }
+        while let chunk = try input.huskRead(upToCount: 1 << 20), !chunk.isEmpty { crc = crc32(crc, chunk); size += UInt64(chunk.count) }
         guard size < 0xFFFF_FFFF, offset < 0xFFFF_FFFF else { throw SaveBackup.Failure("A save file is too large to back up.") }
-        try input.seek(toOffset: 0)
+        try input.huskSeek(toOffset: 0)
         try write(name, size: size, crc: crc) {
             var left = size
-            while left > 0, let chunk = try input.read(upToCount: Int(Swift.min(left, 1 << 20))), !chunk.isEmpty {
-                try self.out.write(contentsOf: chunk); left -= UInt64(chunk.count)
+            while left > 0, let chunk = try input.huskRead(upToCount: Int(Swift.min(left, 1 << 20))), !chunk.isEmpty {
+                try self.out.huskWrite(contentsOf: chunk); left -= UInt64(chunk.count)
             }
         }
     }
@@ -182,7 +182,7 @@ private final class ZipWriter {
         var h = Data()
         h.le32(0x0403_4b50); h.le16(20); h.le16(0x0800); h.le16(0); h.le16(0); h.le16(0x21)
         h.le32(crc); h.le32(UInt32(size)); h.le32(UInt32(size)); h.le16(n.count); h.le16(0); h.append(n)
-        try out.write(contentsOf: h)
+        try out.huskWrite(contentsOf: h)
         try body()
 
         var c = Data()
@@ -195,12 +195,12 @@ private final class ZipWriter {
     }
 
     func finish() throws {
-        try out.write(contentsOf: central)
+        try out.huskWrite(contentsOf: central)
         var e = Data()
         e.le32(0x0605_4b50); e.le16(0); e.le16(0); e.le16(count); e.le16(count)
         e.le32(UInt32(central.count)); e.le32(UInt32(offset)); e.le16(0)
-        try out.write(contentsOf: e)
-        try out.close()
+        try out.huskWrite(contentsOf: e)
+        try out.huskClose()
     }
 }
 
@@ -214,16 +214,16 @@ private final class ZipReader {
 
     init(_ url: URL) throws {
         file = try FileHandle(forReadingFrom: url)
-        let size = try file.seekToEnd()
+        let size = try file.huskSeekToEnd()
         let tail = min(size, 70_000)
-        try file.seek(toOffset: size - tail)
-        let b = [UInt8](try file.read(upToCount: Int(tail)) ?? Data())
+        try file.huskSeek(toOffset: size - tail)
+        let b = [UInt8](try file.huskRead(upToCount: Int(tail)) ?? Data())
         var e = b.count - 22
         while e >= 0, !(b[e] == 0x50 && b[e + 1] == 0x4b && b[e + 2] == 5 && b[e + 3] == 6) { e -= 1 }
         guard e >= 0 else { throw SaveBackup.Failure("That file is not a zip.") }
         let count = Int(Self.u16(b, e + 10)), dirSize = Int(Self.u32(b, e + 12)), dirOff = UInt64(Self.u32(b, e + 16))
-        try file.seek(toOffset: dirOff)
-        let cd = [UInt8](try file.read(upToCount: dirSize) ?? Data())
+        try file.huskSeek(toOffset: dirOff)
+        let cd = [UInt8](try file.huskRead(upToCount: dirSize) ?? Data())
         var p = 0
         for _ in 0..<count {
             guard p + 46 <= cd.count, Self.u32(cd, p) == 0x0201_4b50 else { break }
@@ -237,32 +237,32 @@ private final class ZipReader {
             p += 46 + nl + xl + cl
         }
     }
-    deinit { try? file.close() }
+    deinit { try? file.huskClose() }
 
     private func start(_ e: Entry) throws -> UInt64 {
         guard e.method == 0 else { throw SaveBackup.Failure("That backup was recompressed by another app; Husk reads only the backups it makes.") }
-        try file.seek(toOffset: e.local)
-        let h = [UInt8](try file.read(upToCount: 30) ?? Data())
+        try file.huskSeek(toOffset: e.local)
+        let h = [UInt8](try file.huskRead(upToCount: 30) ?? Data())
         guard h.count == 30 else { throw SaveBackup.Failure("That backup is damaged.") }
         return e.local + 30 + UInt64(Self.u16(h, 26)) + UInt64(Self.u16(h, 28))
     }
 
     func data(_ name: String) throws -> Data? {
         guard let e = entries[name] else { return nil }
-        try file.seek(toOffset: try start(e))
-        return try file.read(upToCount: Int(e.size))
+        try file.huskSeek(toOffset: try start(e))
+        return try file.huskRead(upToCount: Int(e.size))
     }
 
     func extract(_ name: String, to dest: URL) throws {
         guard let e = entries[name] else { return }
-        try file.seek(toOffset: try start(e))
+        try file.huskSeek(toOffset: try start(e))
         FileManager.default.createFile(atPath: dest.path, contents: nil)
         let out = try FileHandle(forWritingTo: dest)
-        defer { try? out.close() }
+        defer { try? out.huskClose() }
         var left = e.size
         while left > 0 {
-            guard let chunk = try file.read(upToCount: Int(min(left, 1 << 20))), !chunk.isEmpty else { throw SaveBackup.Failure("That backup is damaged.") }
-            try out.write(contentsOf: chunk); left -= UInt64(chunk.count)
+            guard let chunk = try file.huskRead(upToCount: Int(min(left, 1 << 20))), !chunk.isEmpty else { throw SaveBackup.Failure("That backup is damaged.") }
+            try out.huskWrite(contentsOf: chunk); left -= UInt64(chunk.count)
         }
     }
 

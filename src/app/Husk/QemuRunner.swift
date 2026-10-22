@@ -1511,8 +1511,9 @@ final class QemuRunner: ObservableObject {
         if QemuRunner.glProven {
             // Before bind, because registering the listener can deliver a
             // scanout immediately and a frame presented through the GL path is
-            // a frame thrown away.
-            huskInstallMetalPresenter()
+            // a frame thrown away. Metal presentation is iOS 15+; the GL path it
+            // replaces is iOS 13+, so there is nothing to fall back to on 12.2.
+            if #available(iOS 15.0, *) { huskInstallMetalPresenter() }
             // The stored rotation is read before the presenter exists, so it
             // has to be handed over once it does.
             DispatchQueue.main.async { HuskGLView.applyStoredRotation() }

@@ -126,7 +126,7 @@ final class LegacyJITViewController: UIViewController {
         }()
         let mapjit = JITBootstrap.mapJITResult
 
-        func addRow(_ title: String, _ value: String, ok: Bool?) {
+        func addRow(_ title: String, _ value: String, _ ok: Bool?) {
             let (valueLabel, line) = row(title)
             valueLabel.text = value
             valueLabel.textColor = ok == nil ? LegacyUI.textDim : (ok! ? LegacyUI.accent : LegacyUI.bad)

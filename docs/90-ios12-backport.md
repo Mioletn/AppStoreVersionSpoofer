@@ -174,6 +174,36 @@ Git Data API. That branch is a temporary build host only and is meant to be
 deleted once the IPA has been retrieved; the canonical branch remains
 `ios12-backport`.
 
+## What the first real compile found
+
+`tools/check_availability.py` reasons about annotations, not about APIs, so the
+first CI build was the first honest answer: 88 diagnostics in 20 files, in six
+groups. Every fix is a compatibility decision, not a lowered floor.
+
+| Group | Sites | Decision |
+|---|---|---|
+| `FileHandle` throwing, offset-based API (iOS 13 / 13.4) | 40 | Shims in `Husk/IOS12Compat.swift` (`huskRead(upToCount:)` and friends) over the iOS 2 primitives. `read(upToCount:)` returns nil at EOF and `readData(ofLength:)` returns empty Data, so the shim keeps the modern semantics and the call sites only change name. |
+| CryptoKit `SHA256` (iOS 13) | 1 | `HuskSHA256`, CommonCrypto's streaming digest with the same `update(data:)` / `finalize()` calls. |
+| `UIFont.monospacedSystemFont` (iOS 13) | 6 | `huskMonospacedFont`: Menlo, present on every iOS 12 device, with the system font as fallback. |
+| BackgroundTasks continued processing (iOS 26 SDK) | 8 | `#if compiler(>=6.2)`: the types are not in the iOS 18.5 SDK at all, so on Xcode 16.4 the feature compiles out and downloads/pairing use the audio keep-alive and the background-task grace period instead. Runtime `#available(iOS 26.0, *)` still decides on a build that has it. |
+| Availability leaks — a 15.0 declaration referenced from unannotated code | 8 | The declaration gets the annotation (`IconCache.load`, `SnowCapShape`, the `WebAppRuntime` extensions, `huskInstallMetalPresenter`, and its one call site guarded). |
+| Main-actor reads from a background queue | 1 | `GuestImage.recordSnapshotPins` takes the pins as an argument; both callers capture them while still on the main actor. |
+
+Three of those were genuine bugs in the shell rather than availability, and only
+a compile could have found them: `UIDocumentPickerViewControllerDelegate` (no
+such protocol; it is `UIDocumentPickerDelegate`), an `addRow` whose `ok:` label
+no caller passed, and `l.textColor = text` where the `text` parameter shadowed
+the `text` colour. The shell also needed its own install pipeline
+(`LegacyUI/LegacyIngest.swift`): upstream's lives in `TranslationLayerStore`,
+which is iOS 15+ even though the work behind it is C, so the shell repeats those
+steps against the same `husk_tl_*` entry points and the same folder layout.
+
+One thing that is not an iOS 12 issue at all: the vendored `StikJIT.xcframework`
+is published built by **Swift 6.4**, whose module interface uses the `Module::Type`
+qualified-name syntax, which Swift 6.1 cannot parse. `scripts/compat_stikjit_interface.py`
+rewrites that text only (the binary module and its ABI are untouched) so Xcode
+16.4 can import the framework at all.
+
 ## Install on iOS 12.2
 
 * **AltStore / SideStore** — 12.2 is exactly AltStore's floor, so this is the
@@ -191,13 +221,13 @@ deleted once the IPA has been retrieved; the canonical branch remains
   is also why an app-clip deep link (`husk://open_app?…`) opens the library on
   the legacy shell instead of a specific game.
 * **Nothing was compiled locally.** The backport was authored without access to
-  a Mac, so every change here — the 226 annotations included — is verified by
-  inspection and by a script (`tools/check_availability.py`) that
-  cross-references annotated types, not by a compiler. The `build-ipa` workflow is the first
-  compile; expect it (or a local first build) to shake out a handful of
-  diagnostics, and the failures will be of the form "'X' is only available in
-  iOS N or newer" with the fix being to raise the offending declaration's
-  annotation, never to lower one.
+  a Mac, so every change here — the 226 annotations included — was verified by
+  inspection and by a script (`tools/check_availability.py`) that cross-references
+  annotated types, not by a compiler. The first `build-ipa` run duly produced 88
+  diagnostics in 20 files; what they were and how each was settled is the
+  "What the first real compile found" section above. Treat that section as the
+  authoritative list, and the rule it follows: raise the offending declaration's
+  annotation, never lower the floor.
 * **Dependency floors.** ANGLE's WebKit build, MoltenVK 1.4.2, QEMU 10.0.12 and
   glib 2.83 have never been compiled against a 12.2 minimum. The scripts set it;
   whether each of them accepts it is the first thing a Mac build will say.

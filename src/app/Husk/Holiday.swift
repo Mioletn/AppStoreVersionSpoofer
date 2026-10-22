@@ -49,6 +49,9 @@ struct Snowfall: View {
 }
 
 /// The lumpy top edge of a layer of snow: flat on top, scalloped underneath.
+/// SwiftUI's `Shape`/`Path` are iOS 13+, and the only thing that draws this is
+/// the iOS 15 decoration in this file.
+@available(iOS 15.0, *)
 private struct SnowCapShape: Shape {
     func path(in r: CGRect) -> Path {
         var p = Path()

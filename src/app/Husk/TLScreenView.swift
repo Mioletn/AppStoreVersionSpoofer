@@ -55,7 +55,7 @@ final class TLScreenUIView: UIView {
         content.actions = ["contents": NSNull(), "bounds": NSNull(), "position": NSNull()]
         layer.addSublayer(content)
 
-        stats.font = .monospacedSystemFont(ofSize: 10, weight: .medium)
+        stats.font = huskMonospacedFont(ofSize: 10, weight: .medium)
         stats.textColor = .white
         stats.backgroundColor = UIColor.black.withAlphaComponent(0.55)
         stats.layer.cornerRadius = 4

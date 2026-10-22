@@ -132,7 +132,7 @@ extension LegacyLibraryViewController: UITableViewDelegate {
     }
 }
 
-extension LegacyLibraryViewController: UIDocumentPickerViewControllerDelegate {
+extension LegacyLibraryViewController: UIDocumentPickerDelegate {
     func documentPicker(_ controller: UIDocumentPickerViewController,
                         didPickDocumentsAt urls: [URL]) {
         guard !urls.isEmpty else { return }

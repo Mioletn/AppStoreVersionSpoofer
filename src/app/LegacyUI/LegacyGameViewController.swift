@@ -60,7 +60,7 @@ final class LegacyGameViewController: UIViewController {
         ])
         gameView = gv
 
-        statusLabel.font = UIFont.monospacedSystemFont(ofSize: 12, weight: .medium)
+        statusLabel.font = huskMonospacedFont(ofSize: 12, weight: .medium)
         statusLabel.textColor = UIColor.white.withAlphaComponent(0.85)
         statusLabel.backgroundColor = UIColor.black.withAlphaComponent(0.55)
         statusLabel.textAlignment = .center
@@ -94,7 +94,7 @@ final class LegacyGameViewController: UIViewController {
 
         logTextView.backgroundColor = UIColor.black.withAlphaComponent(0.92)
         logTextView.textColor = UIColor(red: 0.8, green: 0.9, blue: 0.8, alpha: 1)
-        logTextView.font = UIFont.monospacedSystemFont(ofSize: 10, weight: .regular)
+        logTextView.font = huskMonospacedFont(ofSize: 10, weight: .regular)
         logTextView.isEditable = false
         logTextView.isHidden = true
         logTextView.translatesAutoresizingMaskIntoConstraints = false

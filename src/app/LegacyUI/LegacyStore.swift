@@ -5,8 +5,8 @@
 // Upstream's TranslationLayerStore is an ObservableObject on the main actor
 // (Combine + Swift concurrency, iOS 13+), which iOS 12 cannot run. The shell
 // therefore keeps its own tiny store: the same on-disk layout, read the same
-// way, without any of the reactive machinery. TLApp, TLReport and the import
-// path (TranslationLayer.importCopy) are shared with upstream unchanged.
+// way, without any of the reactive machinery. TLApp, TLReport and the install
+// pipeline (LegacyIngest) are shared with upstream unchanged.
 import Foundation
 import UIKit
 
@@ -74,7 +74,7 @@ final class LegacyStore {
     /// meanwhile, so it simply comes back when it is done.
     func importAPKs(_ urls: [URL], completion: @escaping (String?) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async {
-            let newID = TranslationLayer.importCopy(urls)
+            let newID = LegacyIngest.copy(urls)
             DispatchQueue.main.async {
                 self.reload()
                 completion(newID)
