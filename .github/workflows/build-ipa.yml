@@ -86,9 +86,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Husk-ios12-ipa
+          # build/logs is where each stage's compiler output goes; a red run
+          # without it only says "[FAIL] qemu" and the cause stays on the runner.
           path: |
             build/Husk.ipa
             build/Husk.tipa
+            build/logs/**
           if-no-files-found: warn
 
       - name: Publish release

@@ -53,7 +53,23 @@ export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig:$PREFIX/share/pkgconfig"
 unset PKG_CONFIG_PATH
 
 banner() { printf '\n\033[0;32m=== %s ===\033[0m\n' "$*"; }
-fail()   { printf '\033[0;31m[FAIL] %s (see %s)\033[0m\n' "$1" "$2"; exit 1; }
+# On failure the compiler's own message is the only thing worth having, and the
+# per-stage log lives in a file CI might not have archived (it is gitignored, so
+# a failed run otherwise reports just "[FAIL] qemu-rebuild" with the reason in a
+# log nobody can read). Dump the offending lines plus the tail to stderr.
+fail() {
+    printf '\033[0;31m[FAIL] %s (see %s)\033[0m\n' "$1" "$2" >&2
+    if [ -f "$2" ]; then
+        printf '\n--- %s: errors ---\n' "$1" >&2
+        grep -a -E "error:|fatal error:|undefined symbol|ld: |FAILED:" "$2" | head -20 >&2 || true
+        printf '\n--- %s: last 30 lines ---\n' "$1" >&2
+        tail -30 "$2" >&2
+        printf '\n--- end %s ---\n' "$1" >&2
+    else
+        printf 'log file %s was not created\n' "$2" >&2
+    fi
+    exit 1
+}
 
 done_stage() { [ -f "$STAMPS/$1" ]; }
 mark_stage() { touch "$STAMPS/$1"; }
