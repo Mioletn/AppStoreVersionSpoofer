@@ -10,6 +10,17 @@ cd "$HUSK_ROOT"
 
 step() { printf '\n\033[1;34m##### %s\033[0m\n' "$*"; }
 
+# Preflight: virglrenderer vendors mesa's gallium build files, which parse YAML
+# with meson's `python3` at configure time. Missing pyyaml only surfaces as
+# "src/gallium/meson.build:72:16: ERROR: ... is missing modules: yaml" minutes
+# into the build, so check before anything is compiled.
+PY3="$(command -v python3 || true)"
+if [ -z "$PY3" ] || ! "$PY3" -c 'import yaml' >/dev/null 2>&1; then
+    echo "!! python3 (${PY3:-not found}) cannot import yaml; virglrenderer will not configure." >&2
+    echo "   Homebrew python: brew install pyyaml" >&2
+    exit 1
+fi
+
 step "fetch sources"
 ./scripts/fetch_sources.sh
 

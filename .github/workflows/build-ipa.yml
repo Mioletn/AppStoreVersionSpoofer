@@ -60,6 +60,17 @@ jobs:
           brew install meson ninja pkg-config cmake xcodegen qemu
           rustup target add aarch64-apple-ios
 
+          # virglrenderer vendors mesa's gallium build files, and those parse
+          # YAML with the `yaml` module at configure time; without it meson
+          # aborts with "src/gallium/meson.build:72:16: ERROR:
+          # /opt/homebrew/bin/python3 is missing modules: yaml". Homebrew's
+          # python3 is PEP 668 externally managed, so prefer the formula and
+          # fall back to pip only with --break-system-packages.
+          /opt/homebrew/bin/python3 -c 'import yaml' 2>/dev/null \
+            || brew install pyyaml \
+            || /opt/homebrew/bin/python3 -m pip install --break-system-packages pyyaml
+          /opt/homebrew/bin/python3 -c 'import yaml; print("pyyaml", yaml.__version__)'
+
       - name: Build the IPA
         run: ./scripts/ci_build.sh "$GITHUB_WORKSPACE/build/Husk.ipa"
 
