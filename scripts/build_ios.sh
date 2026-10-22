@@ -61,7 +61,7 @@ fail() {
     printf '\033[0;31m[FAIL] %s (see %s)\033[0m\n' "$1" "$2" >&2
     if [ -f "$2" ]; then
         printf '\n--- %s: errors ---\n' "$1" >&2
-        grep -a -E "error:|fatal error:|undefined symbol|ld: |FAILED:" "$2" | head -20 >&2 || true
+        grep -a -E "error:|fatal error:|undefined symbol|ld: |FAILED:" "$2" | head -40 >&2 || true
         printf '\n--- %s: last 30 lines ---\n' "$1" >&2
         tail -30 "$2" >&2
         printf '\n--- end %s ---\n' "$1" >&2
@@ -216,7 +216,9 @@ stage_qemurebuild() {
     local dir="$SRC/qemu-10.0.12-utm"
     local log="$LOGS/qemu-rebuild.log"
     banner "rebuilding qemu (incremental)"
-    ( cd "$dir/_husk_build" && ninja libqemu-aarch64-softmmu.dylib ) > "$log" 2>&1 \
+    # -k 0: keep compiling after the first error, so one CI run reports every
+    # broken file in the HusK sources instead of just the alphabetically first.
+    ( cd "$dir/_husk_build" && ninja -k 0 libqemu-aarch64-softmmu.dylib ) > "$log" 2>&1 \
         || fail qemu-rebuild "$log"
     echo "[ok  ] $(ls -lh "$dir/_husk_build/libqemu-aarch64-softmmu.dylib" | awk '{print $5}')"
     husk_stage_dylib

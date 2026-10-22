@@ -188,6 +188,21 @@ void husk_ios_jit_install_trap_handler(void)
 
 /* ---------------------------------------------------------------- footprint */
 /*
+ * os_proc_available_memory() is iOS 13+, and the backport must still run on
+ * 12.2, so every caller goes through this shim. The SDK marks the symbol
+ * itself, so the linker weak-imports it for a 12.2 deployment target and
+ * __builtin_available turns that into a runtime check; on iOS 12 there is no
+ * equivalent figure to ask for, and 0 means "unknown" to the callers.
+ */
+static size_t husk_os_proc_available_memory(void)
+{
+    if (__builtin_available(iOS 13.0, *)) {
+        return os_proc_available_memory();
+    }
+    return 0;
+}
+
+/*
  * phys_footprint is the figure jetsam judges us on, so it is the one worth
  * logging around every large allocation. An iOS app with the
  * increased-memory-limit entitlement still dies silently when this crosses the
