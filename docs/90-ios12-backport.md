@@ -120,12 +120,20 @@ Three consequences of 16.4, all already applied:
 * `HuskJITHelper`'s deployment target moved 26.0 → 18.4: Xcode 16.4 rejects a
   target above its SDK version. The helper is only ever launched by the iOS 26
   StikJIT flow (`JITBootstrap` gates it there), so behaviour is unchanged.
-* `libFilePickerFix.dylib` — the only prebuilt binary the app **links** at
-  launch — declared `LC_BUILD_VERSION` min 15.0.0, which dyld on iOS 12 refuses
-  whatever the app's own target says. Its min is patched to 12.2.0 in
-  `src/app/Frameworks/` (the binary references only `NSURL` and
-  `UIDocumentPickerViewController`, both iOS 8 era). `package_ipa.sh` re-signs
-  it ad hoc, so the invalidated signature is regenerated at package time.
+* `libFilePickerFix.dylib` — the prebuilt Theos tweak from issue #60 — declared
+  `LC_BUILD_VERSION` min 15.0.0 (built against the 16.5 SDK), which dyld on
+  iOS 12 refuses whatever the app's own target says. Its min is patched to
+  12.2.0 in `src/app/Frameworks/`, and `package_ipa.sh` re-signs it ad hoc.
+  **That patch was not enough, and the first shipped IPA proved it**: with the
+  dylib *linked*, the tweak loaded at launch, its init block ran, and the first
+  call into one of its imported symbols landed on `0x0` — `SIGSEGV` at address
+  0 on a queue the tweak itself started (`Husk-2026-10-22-131628.ips`). Mapping
+  an image is not the same as it being able to run: the stub and lazy-binding
+  layout this binary uses is the newer one, which iOS 12's dyld does not fill
+  in. It is therefore `link: false` now and `FilePickerFix.installIfAvailable()`
+  dlopens it on iOS 15+, where it was built to run. On 12.2–14.4 the legacy
+  shell copies what the picker returns itself (`LegacyIngest.copy`), which is
+  what the tweak was emulating.
 
 The dependency cross-compiles (`QEMU`, `ANGLE`, `MoltenVK`, `libqemu-*`) pass
 `-miphoneos-version-min=12.2` / `IPHONEOS_DEPLOYMENT_TARGET=12.2`

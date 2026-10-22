@@ -142,10 +142,17 @@ targets:
         embed: true
         codeSign: true
       # The file picker's Open button does nothing on certificate-signed installs; this tweak (from issue #60) hooks
-      # UIDocumentPickerViewController so the picker hands over copies. Linked so it loads at launch.
+      # UIDocumentPickerViewController so the picker hands over copies.
+      #
+      # Embedded but NOT linked. It is a Theos build for iOS 15+ (LC_BUILD_VERSION sdk 16.5), and on iOS 12 its first
+      # imported call lands on 0x0 -- sigsegv at 0, on the queue started from its own init block. Patching its minos
+      # down to 12.2 is enough for dyld to map the image, not enough for its stub and lazy-binding layout, which is
+      # why an IPA that linked it crashed at launch on 12.2. FilePickerFix.installIfAvailable() dlopens it on 15+,
+      # where it was built to run; the legacy shell copies what the picker returns itself (LegacyIngest.copy).
       - framework: Frameworks/libFilePickerFix.dylib
         embed: true
         codeSign: true
+        link: false
       # ANGLE, which the QEMU dylib dlopens by @rpath at GL start-up. Embedded
       # but NOT linked: nothing in the app references its symbols directly, and
       # the only thing that would notice its absence is the dynamic loader.

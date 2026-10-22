@@ -87,6 +87,7 @@ final class HuskAppDelegate: NSObject, UIApplicationDelegate {
         if #available(iOS 15.0, *) {
             // The SwiftUI interface, exactly as upstream ships it.
             HuskLog.log("ui", "iOS 15+: hosting the SwiftUI interface")
+            FilePickerFix.installIfAvailable()
             window?.rootViewController = UIHostingController(rootView: ContentView())
         } else {
             // iOS 12.2: the UIKit legacy shell. No SwiftUI is referenced from
