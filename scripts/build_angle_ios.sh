@@ -73,37 +73,39 @@ fi
 ALIASES="$GPU/angle-aliases.txt"
 
 angle_build () {
-    # The alias flag has to reach xcodebuild as ONE argument. Written inline as
-    # an unquoted ${1:+...} it word-splits at the space, xcodebuild sees a bare
-    # "-Wl,-alias_list,..." and dies with "invalid option" -- which the error
-    # filter below then hides, because it drops lines mentioning xcodebuild.
-    # Build it in an array instead, and expand that array quoted.
+    # Everything xcodebuild needs goes through one array, expanded quoted, so
+    # each element arrives as exactly one argument. Two traps this avoids:
+    #
+    # 1. A '#' comment line inside a backslash-continued command ENDS the
+    #    command in bash. The previous version had its explanatory comment
+    #    between the WK_AVAILABILITY_OVERLAY flags and the deployment target,
+    #    so xcodebuild silently ran without IPHONEOS_DEPLOYMENT_TARGET, without
+    #    OTHER_CFLAGS, without the alias LDFLAGS, and without the log redirect
+    #    (its output went to the step log and $LOG stayed empty -- which is why
+    #    the "last errors" filter printed nothing). Keep comments outside the
+    #    command.
+    # 2. ${ldflags[@]+...} as a bare word is the COMMAND NAME (it does not look
+    #    like an assignment before expansion), so in pass 2 bash tried to run
+    #    "OTHER_LDFLAGS=..." and died with 127 -- the "ANGLE build failed" with
+    #    an empty error list. Building the array explicitly fixes both.
     #
     # $(inherited) is for xcodebuild to expand, not the shell, so it stays
-    # backslash-escaped here.
-    local ldflags=()
+    # backslash-escaped in the LDFLAGS element below.
+    local args=(
+        env -i PATH="$PATH" HOME="$HOME" xcodebuild archive
+        -archivePath "ANGLE" -scheme "ANGLE"
+        -sdk iphoneos -arch arm64 -configuration Release
+        WEBCORE_LIBRARY_DIR="/usr/local/lib" NORMAL_UMBRELLA_FRAMEWORKS_DIR=""
+        CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+        WK_AVAILABILITY_OVERLAY_FLAGS="" WK_AVAILABILITY_OVERLAY_SWIFT_FLAGS=""
+        IPHONEOS_DEPLOYMENT_TARGET="${ANGLE_MINVER:-12.2}"
+        OTHER_CFLAGS='$(inherited) -Wno-unguarded-availability-new -Wno-thread-safety -Wno-thread-safety-attributes -Wno-thread-safety-analysis'
+        OTHER_CPLUSPLUSFLAGS='$(inherited) -Wno-unguarded-availability-new -Wno-thread-safety -Wno-thread-safety-attributes -Wno-thread-safety-analysis'
+    )
     if [ -n "${1:-}" ]; then
-        ldflags=("OTHER_LDFLAGS=\$(inherited) -Wl,-alias_list,$1")
+        args+=("OTHER_LDFLAGS=\$(inherited) -Wl,-alias_list,$1")
     fi
-
-    env -i PATH="$PATH" HOME="$HOME" xcodebuild archive \
-        -archivePath "ANGLE" -scheme "ANGLE" \
-        -sdk iphoneos -arch arm64 -configuration Release \
-        WEBCORE_LIBRARY_DIR="/usr/local/lib" NORMAL_UMBRELLA_FRAMEWORKS_DIR="" \
-        CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
-        WK_AVAILABILITY_OVERLAY_FLAGS="" WK_AVAILABILITY_OVERLAY_SWIFT_FLAGS="" \
-        # 12.2: the iOS 12.2 backport. If this ANGLE revision will not build for
-        # 12.2 (it is WebKit's, and its floor moves), pin an older commit that
-        # does and rebuild -- an LC_VERSION_MIN above 12.2 makes dyld refuse the
-        # dylib at launch on iOS 12. The dylib is embedded but not linked, so a
-        # higher floor is only fatal if something loads it: the guest GL path
-        # does, and it is iOS 15+ on this backport, so ANGLE_MINVER=15.5 is a
-        # documented fallback (ci_build.sh uses it if the 12.2 build fails).
-        IPHONEOS_DEPLOYMENT_TARGET="${ANGLE_MINVER:-12.2}" \
-        OTHER_CFLAGS='$(inherited) -Wno-unguarded-availability-new -Wno-thread-safety -Wno-thread-safety-attributes -Wno-thread-safety-analysis' \
-        OTHER_CPLUSPLUSFLAGS='$(inherited) -Wno-unguarded-availability-new -Wno-thread-safety -Wno-thread-safety-attributes -Wno-thread-safety-analysis' \
-        ${ldflags[@]+"${ldflags[@]}"} \
-        > "$LOG" 2>&1 \
+    "${args[@]}" > "$LOG" 2>&1 \
       || { echo "ANGLE build failed; last errors:" >&2
            grep -a "error:\|^ld: " "$LOG" | head -10 >&2; exit 1; }
 }
