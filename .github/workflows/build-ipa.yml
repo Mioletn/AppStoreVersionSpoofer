@@ -1,0 +1,107 @@
+# Build the iOS 12.2 backport IPA on a GitHub-hosted macOS runner.
+#
+# Why this file exists: the backport targets iOS 12.2, which cannot be built or
+# run from this project's usual development machine (Windows), and -- more to
+# the point -- cannot be built with Xcode 26: binaries from Xcode 26 abort at
+# launch on iOS 12 before didFinishLaunchingWithOptions (Apple feedback thread
+# 829511; the same project launches fine when built with Xcode 16). The runner
+# image pins Xcode 16.4 (Swift 6.1), the newest toolchain whose binaries still
+# launch on iOS 12, with the iOS 18.4 SDK.
+#
+# The build itself is the upstream pipeline (scripts/ci_build.sh): fetch
+# sources, cross-compile QEMU + ANGLE + MoltenVK + the Rust pairing library,
+# then package_ipa.sh (xcodebuild, ad-hoc sign, validate, zip). Everything the
+# iOS 12.2 backport changed for CI lives in those scripts -- see
+# docs/90-ios12-backport.md.
+#
+# Outputs: the IPA and the TrollStore .tipa are attached both as a workflow
+# artifact and to a release tagged ios12-<sha>. On a public repository the
+# release asset downloads without authentication.
+name: build-ipa
+
+# husk-ios12-build is the temporary build branch: this project is normally
+# developed on Windows and the iOS 12.2 IPA must be produced on a macOS runner,
+# so the branch is pushed (content-identical to ios12-backport) to whichever
+# repository can host the Actions run, and deleted once the IPA is retrieved.
+on:
+  push:
+    branches: [ios12-backport, husk-ios12-build]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  ipa:
+    runs-on: macos-15
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain facts
+        run: |
+          sw_vers
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          df -h /
+
+      - name: Select Xcode 16.4
+        # Xcode 26 binaries do not launch on iOS 12; 16.4 is the default on
+        # this image, but select it explicitly so a future image default
+        # cannot silently produce an IPA that crashes at launch.
+        run: |
+          sudo xcode-select -s /Applications/Xcode_16.4.app
+          xcodebuild -version
+          test "$(xcodebuild -version | head -1 | awk '{print $2}')" = "16.4" \
+            || { echo "Xcode 16.4 not selected"; exit 1; }
+
+      - name: Install build dependencies
+        run: |
+          brew install meson ninja pkg-config cmake xcodegen qemu
+          rustup target add aarch64-apple-ios
+
+      - name: Build the IPA
+        run: ./scripts/ci_build.sh "$GITHUB_WORKSPACE/build/Husk.ipa"
+
+      - name: Collect logs
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/logs"
+          cp -a build/logs/. "$RUNNER_TEMP/logs/" 2>/dev/null || true
+          cp /tmp/husk_ipa/build.log "$RUNNER_TEMP/logs/" 2>/dev/null || true
+
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Husk-ios12-ipa
+          path: |
+            build/Husk.ipa
+            build/Husk.tipa
+          if-no-files-found: warn
+
+      - name: Publish release
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="ios12-$(git rev-parse --short HEAD)"
+          gh release create "$TAG" \
+            build/Husk.ipa build/Husk.tipa \
+            --title "Husk for iOS 12.2 — $TAG" \
+            --notes "$(cat <<'EOF'
+          Backport build of Leviidev/Husk with deployment target iOS 12.2.
+
+          - **Husk.ipa** — install with AltStore / SideStore / Sideloadly (all support iOS 12.2).
+          - **Husk.tipa** — for TrollStore (TrollStore itself does not run on iOS 12; use the .ipa there).
+
+          On iOS 12.2 the app runs its UIKit shell (Library / JIT / Settings). The SwiftUI
+          interface, the native runtime (Unity, cocos2d-x, Minecraft, ...), the web-app runtime
+          and QEMU guest emulation need iOS 13/15+ and are not offered on 12.2. JIT on iOS 12
+          needs a debugger attached (ios-deploy / debugserver) or a jailbreak — see the JIT tab.
+
+          Built with Xcode 16.4 (Xcode 26 binaries abort at launch on iOS 12). See
+          docs/90-ios12-backport.md in the repository for the full backport notes.
+          EOF
+          )" \
+            --target "$GITHUB_SHA"
