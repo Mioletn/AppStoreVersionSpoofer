@@ -18,8 +18,16 @@ enum HuskOrientation {
     static func set(_ new: UIInterfaceOrientationMask, attempt: Int = 0) {
         mask = new
         guard #available(iOS 16, *) else {
-            // iOS 15 asks the view controllers again when the device turns; nudge it to ask now
+            // iOS 15 and earlier ask the view controllers again when the device turns; nudge it to ask now.
+            // The nudge is refused while the view controller that wants it is still being presented -- it has not
+            // been asked what it allows yet -- so it is retried for as long as `new` is still what is wanted, the
+            // same way the 16 path is. Without this a portrait app opens in whatever way the device happens to
+            // be held, and the engine is told that size once, for good.
             UIViewController.attemptRotationToDeviceOrientation()
+            guard attempt < 5 else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                if mask == new { set(new, attempt: attempt + 1) }
+            }
             return
         }
         for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {

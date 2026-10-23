@@ -937,7 +937,7 @@ static void *stall_watchdog(void *unused)
             told++;
             tl_log_line("javaapp: no new frame for %d s (%lu frames, ui frame %s) -- the threads:", quiet, f,
                         tl_ui_has_frame() ? "present" : "none");
-            { char lb[512]; tl_log_line("javaapp: %s", husk_layer_describe(g_layer, lb, sizeof lb)); }
+            { char lb[1024]; tl_log_line("javaapp: %s", husk_layer_describe(g_layer, lb, sizeof lb)); }
             log_thread_where();
         }
     }
@@ -980,7 +980,7 @@ static void *gl_main(void *arg)
     if (!ui || !surf || !makeCurrent(dpy, surf, surf, ui)) { tl_log_line("javaapp: no GL context"); return NULL; }
     /* said once before the first frame: a layer that is hidden, out of its window, or the wrong size takes every frame and shows
        none, and nothing else in the log would say so */
-    { char lb[512]; tl_log_line("javaapp: %s", husk_layer_describe(layer, lb, sizeof lb)); }
+    { char lb[1024]; tl_log_line("javaapp: %s", husk_layer_describe(layer, lb, sizeof lb)); }
     if (swapInterval) swapInterval(dpy, 1);
     overlay ov = { 0 }, appov = { 0 }, appup = { 0 };
     ov_init(&ov);
@@ -1075,7 +1075,7 @@ static void *gl_main(void *arg)
                                      swap_ok || !getError ? 0u : getError());
             /* the layer again once a frame has gone into it: a size that changed between the surface being made and now, or a
                layer that left its window, is the difference between a picture and a black screen */
-            if (fn <= 2) { char lb[512]; tl_log_line("javaapp: after frame %lu, %s", fn, husk_layer_describe(layer, lb, sizeof lb)); }
+            if (fn <= 2) { char lb[1024]; tl_log_line("javaapp: after frame %lu, %s", fn, husk_layer_describe(layer, lb, sizeof lb)); }
         }
         next += 1000000000ll / 60;
         int64_t late = now_ns() - next;

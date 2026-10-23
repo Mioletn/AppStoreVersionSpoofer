@@ -220,7 +220,10 @@ final class TLUnityUIView: UIView, UIKeyInput {
         let h = Int((bounds.height * contentScaleFactor).rounded())
         // An Unreal game draws with MoltenVK, which sizes this layer itself to the swapchain it made; sizing it back here on every layout would leave the layer and the
         // swapchain disagreeing from then on.
-        if !(engine == .ue4 && launched) { (layer as? CAMetalLayer)?.drawableSize = CGSize(width: w, height: h) }
+        // A Java app is told its size once, when it starts, and has no way to be told a second one. Resizing the layer under it throws away the frame it has already
+        // presented -- Core Animation keeps nothing it is given after the size moves -- and an app that draws once never draws again, so the screen stays black. Its
+        // drawable is left at the size it started with, and Core Animation scales it into the new frame: a distorted picture rather than no picture.
+        if !(engine == .ue4 && launched) && !(engine == .java && launched) { (layer as? CAMetalLayer)?.drawableSize = CGSize(width: w, height: h) }
         // Flutter lays itself out again at any size, as an Android view does when its window changes: a window being resized, the
         // screen turning.
         if engine == .flutter, launched { husk_flutter_resize(Int32(w), Int32(h)) }
@@ -230,9 +233,15 @@ final class TLUnityUIView: UIView, UIKeyInput {
         // and the game starts as it is rather than not at all.
         if firstLayout == nil, window != nil {
             firstLayout = Date()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.1) { [weak self] in self?.setNeedsLayout() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 6.1) { [weak self] in self?.setNeedsLayout() }
         }
-        let waited = firstLayout.map { Date().timeIntervalSince($0) > 2 } ?? false
+        // A portrait app is given longer, because being told the wrong way up is worse than waiting: the engine is
+        // told its size once, and a portrait app that starts on a screen still landscape is told 2048x1536 for a
+        // window that is about to be 1536x2048 -- every frame it draws goes into a layer that is then resized out
+        // from under it. The screen is turned to what the app asks for before this (HuskOrientation.set, retried),
+        // so the right way up arrives well inside six seconds.
+        let escape = portrait ? 6.0 : 2.0
+        let waited = firstLayout.map { Date().timeIntervalSince($0) > escape } ?? false
         let ready = (portrait ? h > w : w > h) || waited
         if !launched, window != nil, ready { launch(width: w, height: h) }
     }
