@@ -121,9 +121,14 @@ static bool dex_add(const uint8_t *b, size_t size, const char *label)
     d->scache = calloc(d->nstr ? d->nstr : 1, sizeof(*d->scache));
     snprintf(d->name, sizeof(d->name), "%s", label);
     d->ns = g_add_ns;
-    int added = 0;
+    int added = 0, unreadable = 0;
     for (uint32_t i = 0; i < d->ncls; i++) {
         const char *desc = dex_type(d, rd32(b + d->cls_off + 32 * i));
+        /* A class descriptor is text: "Lpkg/Name;". A packed APK hides its classes behind a decryptor, and what its DEX
+           files name them with is bytes, not text -- indexing those gives a class nothing can load, and the app then
+           fails far from the cause (an UnsatisfiedLinkError inside a class called "l/."). Leave them out. */
+        size_t dl = strlen(desc);
+        if (dl < 3 || desc[0] != 'L' || desc[dl - 1] != ';') { unreadable++; continue; }
         char name[512]; desc_to_name(desc, name, sizeof(name));
         if (cdef_find(name)) {
             /* a run-time loader's class named like one already defined: its own, in its namespace (name@ns) */
@@ -140,6 +145,11 @@ static bool dex_add(const uint8_t *b, size_t size, const char *label)
     }
     g_dex[g_ndex++] = d;
     tl_log_line("dvm: %s: %u classes (%d new)", label, d->ncls, added);
+    /* The DEX header counts classes a packer encrypted the bodies and names of: the counts are right, the class_defs
+       are not. Say it once, in the log the user reads, instead of leaving a mystery ten frames down. */
+    if (unreadable && unreadable * 2 >= (int)d->ncls)
+        tl_log_line("dvm: %s: %d of %u classes name nothing readable -- the APK is packed (its code is decrypted at "
+                    "run time and is not in the file): a Java engine reading the file cannot run it", label, unreadable, d->ncls);
     return true;
 }
 

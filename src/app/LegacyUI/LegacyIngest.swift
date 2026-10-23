@@ -131,6 +131,20 @@ enum LegacyIngest {
                 HuskLog.log("tl", "refused \(name): no AndroidManifest.xml inside — \(why)")
                 return .refused(reason: why)
             }
+            // A packer's native library is the one thing an APK cannot hide: the
+            // DEX files it ships are a shell, and the real classes are decrypted
+            // into memory at run time by that library. The runtime reads the DEX
+            // files as they are on disk, so such an app can never start -- it
+            // gets as far as a class whose name is not text and dies there.
+            // Saying why at import costs one central-directory read; the
+            // alternative is the user reading a crash log to learn it.
+            if let packer = packerLibrary(in: path) {
+                try? fm.removeItem(at: dir)
+                HuskLog.log("tl", "refused \(name): packed (\(packer))")
+                return .refused(reason: "“\(name)” is a packed app (\(packer)): its code is encrypted "
+                                      + "and decrypted only at run time, so Husk's Java engine has nothing "
+                                      + "to read. A build of the same app that is not packed runs.")
+            }
             packages.append(adopt(path, name, in: dir, fm: fm))
         }
 
@@ -207,6 +221,33 @@ enum LegacyIngest {
                  + "it has no AndroidManifest.xml."
         }
         return "“\(name)” is not an APK: it is not even a zip archive."
+    }
+
+    /// The native libraries that Android packers ("加固") ship, by the names they
+    /// use once the "lib" prefix and ".so" suffix are off. Prefixes, because
+    /// several versions carry a number in the name (libshella-2.10.5.so). None
+    /// of these is a library an ordinary app links against: a match is the
+    /// packer, not a coincidence.
+    private static let packerLibraries = ["protect", "jiagu", "shella", "shell", "secexe", "secmain",
+                                          "secshell", "exec", "execmain", "sgmain", "sgsecuritybody",
+                                          "mobisec", "tup", "nesec", "dexhelper", "baiduprotect",
+                                          "kwscmm", "chaosvmp", "nqshield", "tprt", "dd", "demolish"]
+
+    /// The packer library inside an APK, if it has one.
+    private static func packerLibrary(in path: String) -> String? {
+        guard let entries = BundleUnpacker.entryNames(in: URL(fileURLWithPath: path)) else { return nil }
+        for entry in entries {
+            let lower = entry.lowercased()
+            guard lower.hasPrefix("lib/"), lower.hasSuffix(".so") else { continue }
+            guard let slash = lower.lastIndex(of: "/") else { continue }
+            let base = String(lower[lower.index(after: slash)...])
+            guard base.hasPrefix("lib"), base.count > 6 else { continue }
+            let stem = String(base.dropFirst(3).dropLast(3))        // "libprotect.so" -> "protect"
+            if packerLibraries.contains(where: { stem.hasPrefix($0) }) {
+                return (entry as NSString).lastPathComponent
+            }
+        }
+        return nil
     }
 
     /// Whether the file starts with a Mach-O magic number, which is what an iOS
