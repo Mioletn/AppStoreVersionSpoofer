@@ -1440,8 +1440,20 @@ static struct {
 NAT(G_present)
 {
     (void)self; (void)ret;
+    static atomic_int presents;
+    int n = atomic_fetch_add(&presents, 1) + 1;
     gbitmap *b = H(gbitmap, 0);
-    if (!b) { atomic_store(&S.any, false); atomic_store(&S.fresh, true); return true; }
+    if (!b) { if (n <= 4) tl_log_line("ui: present #%d: no view frame (the window has nothing to show)", n); atomic_store(&S.any, false); atomic_store(&S.fresh, true); return true; }
+    /* what is being handed to the screen, in one line: a frame the views never drew is the same size as one they did */
+    if (n <= 4) {
+        size_t total = (size_t)b->w * b->h, opaque = 0, lit = 0;
+        for (size_t i = 0; i < total; i++) {
+            if (b->px[i * 4 + 3]) opaque++;
+            if (b->px[i * 4] | b->px[i * 4 + 1] | b->px[i * 4 + 2]) lit++;
+        }
+        tl_log_line("ui: present #%d %dx%d stride %zu: %zu%% opaque, %zu%% not black", n, b->w, b->h, b->stride,
+                    total ? opaque * 100 / total : 0, total ? lit * 100 / total : 0);
+    }
     pthread_mutex_lock(&S.lock);
     if (S.w != b->w || S.h != b->h) { free(S.px); S.px = malloc(b->stride * (size_t)b->h); S.w = b->w; S.h = b->h; }
     memcpy(S.px, b->px, b->stride * (size_t)b->h);

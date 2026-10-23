@@ -16,6 +16,7 @@ public final class ViewRoot implements ViewParent {
     private static Bitmap sScreen;
     private static Canvas sCanvas;
     private static boolean sScheduled, sPresentedAny;
+    private static int sDraws;
     private static Handler sMain;
     private static int sNextViewId = 0x00100000;
     private static int[] sInsets = { 0, 0, 0, 0 };     /* left, top, right, bottom: the notch / status bar and home indicator areas */
@@ -289,6 +290,13 @@ public final class ViewRoot implements ViewParent {
         }
         // a window drawn counts even when its drawing left the generation alone (the screen must lose a closed dialog)
         boolean any = drew || sScreen.getGenerationId() != gen;
+        /* the first draws say what the screen is made of: an app that shows nothing has either no window to draw or one whose
+           views came out 0x0, and neither leaves a trace in the log otherwise */
+        if (sDraws < 2) {
+            sDraws++;
+            android.util.Log.d("ViewDump", "---- draw #" + sDraws + ": " + roots.size() + " window(s), " + sw + "x" + sh + ", drew=" + drew + ", any=" + any);
+            for (ViewRoot r : roots) dump(r.mView, 0);
+        }
         if (any || sPresentedAny) Gfx.present(any ? sScreen.huskNative() : 0);
         sPresentedAny = any;
     }

@@ -98,6 +98,21 @@ jobs:
           bash ./scripts/extract_java_runtime.sh "$IMG"
           rm -f "$IMG"
 
+      - name: Husk's Java framework dex
+        # The cache above is keyed on the system image, but it also holds
+        # husk-framework.dex -- and that one comes from src/java-framework, not
+        # from the image. Rebuilding it here is what makes a change to the
+        # framework (a View, a Native, a Resource) reach the IPA at all; the
+        # cache only pins an old copy otherwise.
+        run: |
+          [ -d build/java-runtime ] || { echo "no runtime: the dex came with it"; exit 0; }
+          R8=build/tools/r8.jar
+          [ -f "$R8" ] || { mkdir -p build/tools; curl -fsSL \
+            "https://dl.google.com/dl/android/maven2/com/android/tools/r8/8.5.35/r8-8.5.35.jar" -o "$R8"; }
+          JDK="$(/usr/libexec/java_home)"
+          HUSK_JDK="$JDK" HUSK_D8="$R8" bash src/java-framework/build.sh build/java-runtime/husk-framework.dex
+          ls -l build/java-runtime/husk-framework.dex
+
       - name: Build the IPA
         run: ./scripts/ci_build.sh "$GITHUB_WORKSPACE/build/Husk.ipa"
 

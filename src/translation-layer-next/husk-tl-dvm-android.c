@@ -11,6 +11,7 @@
 #include "husk-tl-dvm-gl.h"
 
 #include <fcntl.h>
+#include <mach/mach.h>
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdio.h>
@@ -875,6 +876,60 @@ static uint64_t app_frame_seq(void) { pthread_mutex_lock(&E2.lk); uint64_t q = E
 static bool app_frame_on(void) { pthread_mutex_lock(&E2.lk); bool q = E2.on; pthread_mutex_unlock(&E2.lk); return q; }
 
 /*
+ * Where every thread is, when the screen stops changing: a Java app that shows nothing looks the same whether its views drew an
+ * empty window or its UI thread is stuck inside SQLite, and the log the phone keeps is all there is to tell them apart. Each
+ * thread is stopped for as long as it takes to read its pc and lr, then let go.
+ */
+static void log_thread_where(void)
+{
+    thread_act_array_t th; mach_msg_type_number_t n = 0;
+    if (task_threads(mach_task_self(), &th, &n) != KERN_SUCCESS) { tl_log_line("  (no thread list)"); return; }
+    thread_act_t me = mach_thread_self();
+    for (mach_msg_type_number_t i = 0; i < n; i++) {
+        if (th[i] == me) continue;
+        char tn[64] = "-";
+        pthread_t pt = pthread_from_mach_thread_np(th[i]);
+        if (pt) pthread_getname_np(pt, tn, sizeof(tn));
+        if (thread_suspend(th[i]) != KERN_SUCCESS) continue;
+        arm_thread_state64_t st; mach_msg_type_number_t cnt = ARM_THREAD_STATE64_COUNT;
+        if (thread_get_state(th[i], ARM_THREAD_STATE64, (thread_state_t)&st, &cnt) == KERN_SUCCESS) {
+            const void *pc = (void *)arm_thread_state64_get_pc(st), *lr = (void *)arm_thread_state64_get_lr(st);
+            const char *l1 = NULL, *l2 = NULL; const void *s1 = NULL, *s2 = NULL;
+            const char *y1 = tl_ld_symbol_at(pc, &l1, &s1), *y2 = tl_ld_symbol_at(lr, &l2, &s2);
+            tl_log_line("  thread %u '%s': %s+%ld in %s | called from %s+%ld in %s", i, tn,
+                        y1 ? y1 : "?", s1 ? (long)((const char *)pc - (const char *)s1) : 0L, l1 ? l1 : "husk",
+                        y2 ? y2 : "?", s2 ? (long)((const char *)lr - (const char *)s2) : 0L, l2 ? l2 : "husk");
+        }
+        thread_resume(th[i]);
+    }
+    mach_port_deallocate(mach_task_self(), me);
+    vm_deallocate(mach_task_self(), (vm_address_t)th, n * sizeof(thread_act_t));
+}
+
+/* Says where the threads are once the frame count has stood still: a static window is normal, and the log then shows whether the
+   UI thread is idle in its message loop or somewhere it should not be. */
+static void *stall_watchdog(void *unused)
+{
+    (void)unused;
+    pthread_setname_np("FrameWatch");
+    unsigned long last = 0; int quiet = 0, told = 0;
+    for (;;) {
+        sleep(1);
+        if (atomic_load(&A.ended)) return NULL;
+        unsigned long f = atomic_load(&A.frames);
+        if (f != last) { last = f; quiet = 0; continue; }
+        if (atomic_load(&A.paused)) { quiet = 0; continue; }
+        quiet++;
+        if ((quiet == 5 || (quiet > 5 && (quiet - 5) % 20 == 0)) && told < 4) {
+            told++;
+            tl_log_line("javaapp: no new frame for %d s (%lu frames, ui frame %s) -- the threads:", quiet, f,
+                        tl_ui_has_frame() ? "present" : "none");
+            log_thread_where();
+        }
+    }
+}
+
+/*
  * The render thread: one EGL surface on the app's screen, and on it, each frame, what the app's GLSurfaceView renderer draws (in
  * the app's own context) with the window's views over it (in Husk's). An app without GL still gets this thread for its views.
  */
@@ -981,9 +1036,13 @@ static void *gl_main(void *arg)
             makeCurrent(dpy, surf, surf, ui);
             if (!app) { clearColor(0, 0, 0, tl_web_any_visible() && !app_frame_on() ? 0 : 1); clear(0x4000); }     /* web views show through from under the screen */
             if (!app) app_frame_draw(&appov, &appup, A.cfg.width, A.cfg.height);
-            if (tl_ui_has_frame()) ov_draw(&ov, A.cfg.width, A.cfg.height);
+            bool drew_views = tl_ui_has_frame();
+            if (drew_views) ov_draw(&ov, A.cfg.width, A.cfg.height);
             swapBuffers(dpy, surf);
-            atomic_fetch_add(&A.frames, 1);
+            unsigned long fn = atomic_fetch_add(&A.frames, 1) + 1;
+            if (fn <= 3 || fn % 300 == 0)
+                tl_log_line("javaapp: frame %lu on screen %dx%d (views %s, their pixels %dx%d)", fn, A.cfg.width, A.cfg.height,
+                            drew_views ? "drawn" : "not drawn", ov.tw, ov.th);
         }
         next += 1000000000ll / 60;
         int64_t late = now_ns() - next;
@@ -1152,6 +1211,9 @@ bool tl_javaapp_start(const tl_javaapp_config *cfg)
     if (!tl_dvm_add_apk(cfg->apk_path)) return false;
     { char lib[1100]; snprintf(lib, sizeof(lib), "%s/lib", A.data); mkdir(lib, 0755); tl_ld_apk_libs(stub_lib, lib); }
     { pthread_attr_t rt; pthread_attr_init(&rt); pthread_attr_setstacksize(&rt, 64u << 20); pthread_create(&A.gl_thread, &rt, gl_main, NULL); }
+    { pthread_attr_t wt; pthread_attr_init(&wt); pthread_attr_setstacksize(&wt, 256u << 10);
+      pthread_t w; if (pthread_create(&w, &wt, stall_watchdog, NULL) == 0) pthread_detach(w);
+      pthread_attr_destroy(&wt); }
     pthread_attr_t at; pthread_attr_init(&at); pthread_attr_setstacksize(&at, 256u << 20);
     pthread_t t;
     return pthread_create(&t, &at, app_main, NULL) == 0;
