@@ -12,6 +12,7 @@
 
 #include <fcntl.h>
 #include <mach/mach.h>
+#include <mach/vm_map.h>
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdio.h>

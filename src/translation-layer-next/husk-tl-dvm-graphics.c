@@ -23,6 +23,7 @@
 
 #include "husk-tl-dvm-internal.h"
 #include "husk-tl-dvm-javaapp.h"
+#include "husk-tl-bionic.h"
 #include "husk-tl-internal.h"
 
 const char *tl_path_resolve(const char *path, char *buf, size_t n);
