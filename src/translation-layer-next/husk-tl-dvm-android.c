@@ -17,6 +17,7 @@
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <dlfcn.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
@@ -29,6 +30,9 @@
 
 void tl_nwindow_configure(int w, int h, void *layer);
 void *tl_nwindow_get(void);
+void *tl_nwindow_native(void *window);
+/* husk-tl-layer-probe.m: what the layer the engine renders into actually is to Core Animation. */
+const char *husk_layer_describe(void *layer, char *out, size_t n);
 
 static struct {
     tl_javaapp_config cfg;
@@ -42,6 +46,7 @@ static struct {
     pthread_t gl_thread;
     bool gl_started;
     jobj *content;
+    atomic_int want_w, want_h;                  /* the host's layer changed size: the surface is remade at this size */
     char fwres[1024];
     tl_zip fwres_zip; bool fwres_tried, fwres_ok;
     pthread_mutex_t t_lock;
@@ -881,6 +886,8 @@ static bool app_frame_on(void) { pthread_mutex_lock(&E2.lk); bool q = E2.on; pth
  * empty window or its UI thread is stuck inside SQLite, and the log the phone keeps is all there is to tell them apart. Each
  * thread is stopped for as long as it takes to read its pc and lr, then let go.
  */
+static void *g_layer;                    /* the host's CAMetalLayer, for the watchdog to describe when nothing moves */
+
 static void log_thread_where(void)
 {
     thread_act_array_t th; mach_msg_type_number_t n = 0;
@@ -897,9 +904,14 @@ static void log_thread_where(void)
             const void *pc = (void *)arm_thread_state64_get_pc(st), *lr = (void *)arm_thread_state64_get_lr(st);
             const char *l1 = NULL, *l2 = NULL; const void *s1 = NULL, *s2 = NULL;
             const char *y1 = tl_ld_symbol_at(pc, &l1, &s1), *y2 = tl_ld_symbol_at(lr, &l2, &s2);
+            /* tl_ld_symbol_at knows the Android libraries the APK brought; Husk's own threads run in the app's main image, which
+               only dladdr knows. Without this every line reads "?+0 in husk", which says nothing about where a thread is. */
+            Dl_info d1, d2;
+            if (!y1 && dladdr(pc, &d1) && d1.dli_sname) { y1 = d1.dli_sname; s1 = d1.dli_saddr; l1 = "husk"; }
+            if (!y2 && dladdr(lr, &d2) && d2.dli_sname) { y2 = d2.dli_sname; s2 = d2.dli_saddr; l2 = "husk"; }
             tl_log_line("  thread %u '%s': %s+%ld in %s | called from %s+%ld in %s", i, tn,
-                        y1 ? y1 : "?", s1 ? (long)((const char *)pc - (const char *)s1) : 0L, l1 ? l1 : "husk",
-                        y2 ? y2 : "?", s2 ? (long)((const char *)lr - (const char *)s2) : 0L, l2 ? l2 : "husk");
+                        y1 ? y1 : "?", s1 ? (long)((const char *)pc - (const char *)s1) : 0L, l1 ? l1 : "?",
+                        y2 ? y2 : "?", s2 ? (long)((const char *)lr - (const char *)s2) : 0L, l2 ? l2 : "?");
         }
         thread_resume(th[i]);
     }
@@ -925,6 +937,7 @@ static void *stall_watchdog(void *unused)
             told++;
             tl_log_line("javaapp: no new frame for %d s (%lu frames, ui frame %s) -- the threads:", quiet, f,
                         tl_ui_has_frame() ? "present" : "none");
+            { char lb[512]; tl_log_line("javaapp: %s", husk_layer_describe(g_layer, lb, sizeof lb)); }
             log_thread_where();
         }
     }
@@ -959,8 +972,14 @@ static void *gl_main(void *arg)
     if (!es3 && (!chooseConfig(dpy, want2, &cfg, 1, &ncfg) || ncfg < 1)) { tl_log_line("javaapp: no EGL config"); return NULL; }
     const EGLint ui_attr[] = { 0x3098, 2, EGL_NONE };
     EGLContext ui = createContext(dpy, cfg, NULL, ui_attr), app = NULL;
-    EGLSurface surf = createWindowSurface(dpy, cfg, tl_nwindow_get(), NULL);
+    void *win_h = tl_nwindow_get();
+    void *layer = tl_nwindow_native(win_h);              /* the host's CAMetalLayer: what the frames go into */
+    g_layer = layer;
+    EGLSurface surf = createWindowSurface(dpy, cfg, win_h, NULL);
     if (!ui || !surf || !makeCurrent(dpy, surf, surf, ui)) { tl_log_line("javaapp: no GL context"); return NULL; }
+    /* said once before the first frame: a layer that is hidden, out of its window, or the wrong size takes every frame and shows
+       none, and nothing else in the log would say so */
+    { char lb[512]; tl_log_line("javaapp: %s", husk_layer_describe(layer, lb, sizeof lb)); }
     if (swapInterval) swapInterval(dpy, 1);
     overlay ov = { 0 }, appov = { 0 }, appup = { 0 };
     ov_init(&ov);
@@ -1033,7 +1052,12 @@ static void *gl_main(void *arg)
         uint64_t q = app_frame_seq();
         bool app_fresh = q != app_seq;
         app_seq = q;
-        if (drew || fresh || app_fresh) {
+        /* A window that stops changing still has to arrive. Core Animation keeps nothing it is handed before the layer is laid out
+           and in a window -- no error, no callback -- so an app that draws once and stops (its views are the whole screen, and they
+           do not move) leaves a black screen and a log that says one frame went on screen. While the app is young, the frame it
+           already has is handed over again every vsync, so a screen that never changes still gets there. */
+        bool settle = atomic_load(&A.frames) < 240 && tl_ui_has_frame();
+        if (drew || fresh || app_fresh || settle) {
             makeCurrent(dpy, surf, surf, ui);
             if (!app) { clearColor(0, 0, 0, tl_web_any_visible() && !app_frame_on() ? 0 : 1); clear(0x4000); }     /* web views show through from under the screen */
             if (!app) app_frame_draw(&appov, &appup, A.cfg.width, A.cfg.height);
@@ -1044,6 +1068,9 @@ static void *gl_main(void *arg)
             if (fn <= 3 || fn % 300 == 0)
                 tl_log_line("javaapp: frame %lu on screen %dx%d (views %s, their pixels %dx%d)", fn, A.cfg.width, A.cfg.height,
                             drew_views ? "drawn" : "not drawn", ov.tw, ov.th);
+            /* the layer again once a frame has gone into it: a size that changed between the surface being made and now, or a
+               layer that left its window, is the difference between a picture and a black screen */
+            if (fn <= 2) { char lb[512]; tl_log_line("javaapp: after frame %lu, %s", fn, husk_layer_describe(layer, lb, sizeof lb)); }
         }
         next += 1000000000ll / 60;
         int64_t late = now_ns() - next;
