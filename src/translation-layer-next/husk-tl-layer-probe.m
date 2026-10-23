@@ -62,7 +62,8 @@ const char *husk_layer_describe(void *p, char *out, size_t n)
     /* Eight layers is deeper than UIKit ever goes, and the window is the end of the chain anyway. */
     for (CALayer *c = l; c && used + 80 < n; c = c.superlayer) {
         const char *cls = class_getName(object_getClass(c));
-        UIView *owner = [c.delegate isKindOfClass:[UIView class]] ? (UIView *)c.delegate : nil;
+        UIView *owner = nil;
+        if ([c.delegate isKindOfClass:[UIView class]]) owner = (UIView *)c.delegate;
         size_t got = (size_t)snprintf(out + used, n - used, " %s%s %.0fx%.0f@(%.0f,%.0f) h%d o%.2f",
                                       c == l ? "" : "<- ", cls ? cls : "?",
                                       (double)c.bounds.size.width, (double)c.bounds.size.height,
