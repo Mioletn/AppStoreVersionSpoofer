@@ -29,15 +29,21 @@ const char *husk_layer_describe(void *p, char *out, size_t n)
         pwt = m.presentsWithTransaction ? 1 : 0;
         drawsAsync = m.drawsAsynchronously ? 1 : 0;
     }
-    UIWindow *win = l.window;
+    /* CALayer has no window of its own on iOS: the one it is in is found through the layer's owner, the UIView, which is the
+       layer's delegate -- and a layer whose chain reaches no view at all is a layer nothing can display. */
+    UIWindow *win = nil;
+    for (CALayer *c = l; c && !win; c = c.superlayer) {
+        id owner = c.delegate;
+        if ([owner isKindOfClass:[UIView class]]) win = ((UIView *)owner).window;
+    }
     snprintf(out, n,
              "layer %p: bounds %.0fx%.0f @%.0f,%.0f scale %.2f drawable %.0fx%.0f | hidden %d opacity %.2f "
-             "opaque %d | fbOnly %d pwt %d async %d | superlayer %p window %p%s | inWindow %d",
-             (void *)l, (double)l.bounds.size.width, (double)l.bounds.size.height,
+             "opaque %d | fbOnly %d pwt %d async %d | superlayer %p window %p%s",
+             (__bridge void *)l, (double)l.bounds.size.width, (double)l.bounds.size.height,
              (double)l.bounds.origin.x, (double)l.bounds.origin.y, (double)l.contentsScale,
              (double)ds.width, (double)ds.height, (int)l.hidden, (double)l.opacity, (int)l.isOpaque,
-             fbOnly, pwt, drawsAsync, (void *)l.superlayer, (void *)win,
-             (win && win.hidden) ? " HIDDEN" : "", l.window != nil ? 1 : 0);
+             fbOnly, pwt, drawsAsync, (__bridge void *)l.superlayer, (__bridge void *)win,
+             (win && win.hidden) ? " HIDDEN" : "");
 #else
     (void)p;
     snprintf(out, n, "layer: iOS only");
