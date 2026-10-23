@@ -960,6 +960,7 @@ static void *gl_main(void *arg)
     unsigned (*makeCurrent)(EGLDisplay, EGLSurface, EGLSurface, EGLContext) = tl_egl_resolve("eglMakeCurrent");
     unsigned (*swapBuffers)(EGLDisplay, EGLSurface) = tl_egl_resolve("eglSwapBuffers");
     unsigned (*swapInterval)(EGLDisplay, EGLint) = tl_egl_resolve("eglSwapInterval");
+    unsigned (*getError)(void) = tl_egl_resolve("eglGetError");
     if (!getDisplay || !createWindowSurface || !swapBuffers) { tl_log_line("javaapp: EGL is not available"); return NULL; }
     EGLDisplay dpy = getDisplay(NULL);
     EGLint major = 0, minor = 0;
@@ -1063,11 +1064,15 @@ static void *gl_main(void *arg)
             if (!app) app_frame_draw(&appov, &appup, A.cfg.width, A.cfg.height);
             bool drew_views = tl_ui_has_frame();
             if (drew_views) ov_draw(&ov, A.cfg.width, A.cfg.height);
-            swapBuffers(dpy, surf);
+            unsigned swap_ok = swapBuffers(dpy, surf);
             unsigned long fn = atomic_fetch_add(&A.frames, 1) + 1;
             if (fn <= 3 || fn % 300 == 0)
                 tl_log_line("javaapp: frame %lu on screen %dx%d (views %s, their pixels %dx%d)", fn, A.cfg.width, A.cfg.height,
                             drew_views ? "drawn" : "not drawn", ov.tw, ov.th);
+            /* a swap that returned false is a frame that never left: ANGLE refuses it when the layer has no drawable to give
+               (a layer of no size, or one that is not the display's), and that is invisible from the frame count alone */
+            if (fn <= 3) tl_log_line("javaapp:   swap returned %s (egl error %#x)", swap_ok ? "true" : "FALSE",
+                                     swap_ok || !getError ? 0u : getError());
             /* the layer again once a frame has gone into it: a size that changed between the surface being made and now, or a
                layer that left its window, is the difference between a picture and a black screen */
             if (fn <= 2) { char lb[512]; tl_log_line("javaapp: after frame %lu, %s", fn, husk_layer_describe(layer, lb, sizeof lb)); }
