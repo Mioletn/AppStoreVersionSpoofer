@@ -81,12 +81,28 @@ final class LegacyGameViewController: UIViewController {
     /// Godot, GTA, GameMaker, the Java runtime, Flutter. The runtime presents
     /// into this view's CAMetalLayer on its own thread; GL comes from the ANGLE
     /// dylib the app carries, which is built for 12.2 like everything else here.
+    /// One view per app, for the life of the process.
+    ///
+    /// The runtime is handed this view's CAMetalLayer and an engine cannot be started twice. A second visit that made
+    /// a second view would put a fresh, empty layer on screen while every frame still went into the first one -- which
+    /// is no longer in a window. The picture is perfect, the frame count is honest, and the screen is black. The iOS 15
+    /// screen keeps its views for exactly this reason (TLUnityScreen.shared); this is the same rule for the 12.2 shell.
+    private static var nativeViews: [String: TLUnityUIView] = [:]
+
     private func buildNativeScreen(apk: String) {
-        let gv = TLUnityUIView(apk: apk,
+        let gv: TLUnityUIView
+        if let kept = Self.nativeViews[apk] {
+            gv = kept
+            gv.removeFromSuperview()          /* still the engine's layer: it belongs to whichever screen shows it now */
+            HuskLog.log("tl", "ios12 shell: \(app.label) already owns a GL layer — reusing that view")
+        } else {
+            gv = TLUnityUIView(apk: apk,
                                extraApks: Array(app.apks.dropFirst()),
                                dataDir: app.nativeDataDir,
                                engine: app.screenEngine,
                                portrait: app.drawsPortraitByManifest())
+            Self.nativeViews[apk] = gv
+        }
         gv.onThreeFingerTap = { [weak self] in self?.toggleChrome() }
         gv.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(gv)
