@@ -104,13 +104,19 @@ final class LegacyGameViewController: UIViewController {
             Self.nativeViews[apk] = gv
         }
         gv.onThreeFingerTap = { [weak self] in self?.toggleChrome() }
-        gv.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(gv)
+        // Held by the same host the windowed screen uses, for the same reason. An engine is told its size once, when it starts;
+        // a view pinned to this controller's edges resizes with the window, which changes the layer's drawable under a running
+        // engine. Core Animation keeps nothing it is handed after the size moves, and an app that draws once never draws again --
+        // the frame count stays honest and the screen is black. The host keeps the view at the size it started and scales the
+        // picture into whatever the window then is.
+        let host = TLWindowHost(game: gv)
+        host.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(host)
         NSLayoutConstraint.activate([
-            gv.topAnchor.constraint(equalTo: view.topAnchor),
-            gv.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            gv.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            gv.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            host.topAnchor.constraint(equalTo: view.topAnchor),
+            host.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            host.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            host.trailingAnchor.constraint(equalTo: view.trailingAnchor),
         ])
         nativeView = gv
 

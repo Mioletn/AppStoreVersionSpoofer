@@ -337,7 +337,14 @@ struct TLWindowScreen: UIViewRepresentable {
     func updateUIView(_ view: TLWindowHost, context: Context) { view.setNeedsLayout() }
 }
 
-@available(iOS 15.0, *)
+/// Holds the app's one view at the size it was given and scales the picture into the window.
+///
+/// An engine is told its size once, when it starts, and keeps it for good: a view that resizes with its window would change the
+/// layer's drawable under a running engine, and Core Animation keeps nothing it is handed after the size moves. So the view keeps
+/// its launched bounds and is scaled instead -- a picture of the right shape, rather than a layer with no drawable at all.
+///
+/// No floor of its own: bounds, centre and a transform are UIKit from iOS 2. The iOS 12.2 shell uses it for exactly the reason it
+/// exists, which is why it is not marked 15.0 along with the windowed screen that first needed it.
 final class TLWindowHost: UIView {
     let game: TLUnityUIView
 

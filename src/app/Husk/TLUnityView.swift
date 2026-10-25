@@ -220,10 +220,9 @@ final class TLUnityUIView: UIView, UIKeyInput {
         let h = Int((bounds.height * contentScaleFactor).rounded())
         // An Unreal game draws with MoltenVK, which sizes this layer itself to the swapchain it made; sizing it back here on every layout would leave the layer and the
         // swapchain disagreeing from then on.
-        // A Java app is told its size once, when it starts, and has no way to be told a second one. Resizing the layer under it throws away the frame it has already
-        // presented -- Core Animation keeps nothing it is given after the size moves -- and an app that draws once never draws again, so the screen stays black. Its
-        // drawable is left at the size it started with, and Core Animation scales it into the new frame: a distorted picture rather than no picture.
-        if !(engine == .ue4 && launched) && !(engine == .java && launched) { (layer as? CAMetalLayer)?.drawableSize = CGSize(width: w, height: h) }
+        // Nothing else resizes this view after it has started: TLWindowHost holds it at the size it was given and scales the picture, so this line runs once per launch
+        // and the layer keeps the drawable the engine made its swapchain against.
+        if !(engine == .ue4 && launched) { (layer as? CAMetalLayer)?.drawableSize = CGSize(width: w, height: h) }
         // Flutter lays itself out again at any size, as an Android view does when its window changes: a window being resized, the
         // screen turning.
         if engine == .flutter, launched { husk_flutter_resize(Int32(w), Int32(h)) }
