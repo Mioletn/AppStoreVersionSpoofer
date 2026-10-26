@@ -357,6 +357,16 @@ enum HuskLog {
         log("boot", "================ Husk starting ================")
         log("boot", "device      : \(model)")
         log("boot", "system      : \(d.systemName) \(d.systemVersion)")
+        // iOS 12 ignores UILaunchScreen (iOS 14+), so an app without a launch
+        // storyboard is run in a 1024x768 compatibility canvas and scaled onto
+        // the real screen. That letterbox is invisible in every other line, and
+        // a CAMetalLayer inside it is exactly the "frames count, screen black"
+        // shape: log both sizes so the two can be told apart immediately.
+        let screen = UIScreen.main
+        log("boot", "screen      : bounds \(screen.bounds.size) nativeBounds \(screen.nativeBounds.size) "
+                  + "scale \(screen.scale) nativeScale \(screen.nativeScale)")
+        let launchBoard = Bundle.main.object(forInfoDictionaryKey: "UILaunchStoryboardName") as? String
+        log("boot", "launch scrn : \(launchBoard ?? "MISSING -- iOS 12 will letterbox at 1024x768")")
         log("boot", "physical RAM: \(mem) MiB")
         log("boot", "processors  : \(ProcessInfo.processInfo.processorCount) "
                   + "(active \(ProcessInfo.processInfo.activeProcessorCount))")

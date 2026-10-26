@@ -57,6 +57,36 @@ final class LegacyGameViewController: UIViewController {
         HuskOrientation.set(HuskOrientation.standard)
     }
 
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        logWindowState("on appear")
+        // Once more after layout has settled: a window that is hidden, behind
+        // another, or of the wrong size at the moment a frame is first presented
+        // is the difference between a picture and a black screen, and only the
+        // second look is after Auto Layout has run.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            self?.logWindowState("after 1 s")
+        }
+    }
+
+    /// Every UIWindow, in front-to-back order, with the one this screen is in
+    /// marked. A game layer can be unhidden, opaque and in a key window and still
+    /// be covered by another window -- that is invisible in every other log line,
+    /// so the whole list goes in.
+    private func logWindowState(_ when: String) {
+        let screen = UIScreen.main
+        let windows = UIApplication.shared.windows
+        HuskLog.log("ui", "windows \(windows.count) \(when); screen \(screen.bounds.size) "
+                  + "native \(screen.nativeBounds.size) scale \(screen.scale)/\(screen.nativeScale)")
+        for (i, w) in windows.enumerated() {
+            let root = w.rootViewController.map { String(describing: type(of: $0)) } ?? "nil"
+            let ours = (w === view.window) ? " <-- this screen" : ""
+            HuskLog.log("ui", "  #\(i) \(NSStringFromCGRect(w.frame)) level \(w.windowLevel) "
+                      + "hidden \(w.isHidden) key \(w.isKeyWindow) root \(root)\(ours)")
+        }
+        HuskLog.log("ui", "  our view \(NSStringFromCGRect(view.frame)), window \(view.window != nil ? "yes" : "NO")")
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black
@@ -90,6 +120,20 @@ final class LegacyGameViewController: UIViewController {
     private static var nativeViews: [String: TLUnityUIView] = [:]
 
     private func buildNativeScreen(apk: String) {
+        // An engine cannot be unloaded once it has started, so a run that already
+        // loaded a different APK cannot start this one. This used to fall through
+        // to "unity: already started; resuming" and leave the dead app's black
+        // layer on screen -- which reads exactly like the black-screen bug and
+        // is not it. Say what is wrong instead, as the windowed screen does.
+        if husk_unity_state() != Int32(HUSK_UNITY_IDLE),
+           let loaded = husk_native_loaded_apk().map({ String(cString: $0) }),
+           loaded != apk {
+            let name = (loaded as NSString).lastPathComponent
+            HuskLog.log("tl", "ios12 shell: refusing \(app.label) -- \(name) is already loaded "
+                      + "this session; force-quit Husk to run this one")
+            buildLoadedElsewhereScreen(name)
+            return
+        }
         let gv: TLUnityUIView
         if let kept = Self.nativeViews[apk] {
             gv = kept
@@ -191,8 +235,10 @@ final class LegacyGameViewController: UIViewController {
         back.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
         let log = LegacyUI.button("Log", filled: false)
         log.addTarget(self, action: #selector(logTapped), for: .touchUpInside)
+        let export = LegacyUI.button("Export", filled: false)
+        export.addTarget(self, action: #selector(exportLogTapped), for: .touchUpInside)
 
-        var buttons = [log, back]
+        var buttons = [export, log, back]
         if includeStop {
             let stop = LegacyUI.button("Stop", filled: false)
             stop.addTarget(self, action: #selector(stopTapped), for: .touchUpInside)
@@ -254,6 +300,40 @@ final class LegacyGameViewController: UIViewController {
         ])
     }
 
+    /// A run can load one engine, so a second app in the same run gets this
+    /// screen instead of a black one.
+    private func buildLoadedElsewhereScreen(_ loaded: String) {
+        let title = UILabel()
+        title.text = "Another app is already loaded"
+        title.font = UIFont.systemFont(ofSize: 18, weight: .semibold)
+        title.textColor = .white
+        title.textAlignment = .center
+        title.numberOfLines = 0
+
+        let body = UILabel()
+        body.text = "\(loaded) was started in this session, and an engine cannot be unloaded. "
+                  + "Force-quit Husk (swipe it away in the app switcher), open it again, "
+                  + "and then open \(app.label)."
+        body.font = UIFont.systemFont(ofSize: 15)
+        body.textColor = UIColor.white.withAlphaComponent(0.8)
+        body.textAlignment = .center
+        body.numberOfLines = 0
+
+        let back = LegacyUI.button("Back to Library")
+        back.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
+
+        let stack = UIStackView(arrangedSubviews: [title, body, back])
+        stack.axis = .vertical
+        stack.spacing = 20
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 28),
+            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -28),
+        ])
+    }
+
     // MARK: chrome
 
     private func refreshStatus() {
@@ -303,6 +383,64 @@ final class LegacyGameViewController: UIViewController {
             logTimer?.cancel()
             logTimer = nil
         }
+    }
+
+    /// Write the whole run to one file and hand it to the share sheet.
+    ///
+    /// The log panel is readable on the device but a screenshot of it cannot be
+    /// searched, diffed or pasted into a terminal -- and the lines that matter
+    /// (screen bounds, window order, gpu readback) are exactly the ones a
+    /// screenshot loses. The file goes into Documents (also visible over the
+    /// Files app and iTunes, since UIFileSharingEnabled is on) and the share
+    /// sheet offers AirDrop and Save to Files.
+    @objc private func exportLogTapped() {
+        HuskLog.flushNow()
+        let fm = FileManager.default
+        let dir = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
+
+        let f = DateFormatter()
+        f.dateFormat = "yyyyMMdd-HHmmss"
+        let dest = dir.appendingPathComponent("husk-export-\(f.string(from: Date())).log")
+
+        let info = Bundle.main.infoDictionary ?? [:]
+        let screen = UIScreen.main
+        var text = """
+        Husk export — \(app.label)
+        when    : \(Date())
+        build   : \(info["CFBundleVersion"] ?? "?") \
+        \(info["HuskBuildCommit"] ?? "?") built \(info["HuskBuildDate"] ?? "?")
+        screen  : bounds \(screen.bounds.size) nativeBounds \(screen.nativeBounds.size) \
+        scale \(screen.scale)/\(screen.nativeScale)
+        state   : husk_unity_state=\(husk_unity_state()) frames=\(husk_unity_frames())
+
+        """
+        for name in ["husk.log", "husk-native.log"] {
+            if let s = try? String(contentsOf: dir.appendingPathComponent(name), encoding: .utf8) {
+                text += "\n===== \(name) (\(s.count) chars) =====\n" + s + "\n"
+            }
+        }
+        let attempt = currentLog
+        if !attempt.isEmpty { text += "\n===== attempt log =====\n" + attempt + "\n" }
+
+        do {
+            try text.write(to: dest, atomically: true, encoding: .utf8)
+        } catch {
+            HuskLog.log("ui", "export failed: \(error.localizedDescription)")
+            let alert = UIAlertController(title: "Export failed", message: error.localizedDescription, preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            present(alert, animated: true)
+            return
+        }
+        HuskLog.log("ui", "exported \(dest.lastPathComponent) (\(text.count) chars)")
+        UIPasteboard.general.string = String(text.suffix(20_000))
+
+        let sheet = UIActivityViewController(activityItems: [dest], applicationActivities: nil)
+        if let pop = sheet.popoverPresentationController {
+            pop.sourceView = view
+            pop.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 1, height: 1)
+            pop.permittedArrowDirections = []
+        }
+        present(sheet, animated: true)
     }
 
     @objc private func closeTapped() {

@@ -573,9 +573,25 @@ static uint32_t ov_shader(uint32_t kind, const char *src)
     uint32_t (*create)(uint32_t) = gl_fn("glCreateShader");
     void (*source)(uint32_t, int32_t, const char *const *, const int32_t *) = gl_fn("glShaderSource");
     void (*compile)(uint32_t) = gl_fn("glCompileShader");
+    void (*getiv)(uint32_t, uint32_t, int32_t *) = gl_fn("glGetShaderiv");
+    void (*getlog)(uint32_t, int32_t, int32_t *, char *) = gl_fn("glGetShaderInfoLog");
     uint32_t sh = create(kind);
     source(sh, 1, &src, NULL);
     compile(sh);
+    /* A shader that does not compile still leaves a program object behind, and
+       using it draws nothing: the screen is the clear colour and the frame
+       count is honest, which is indistinguishable from "the compositor never
+       showed it". Say so once, with the driver's own reason. */
+    if (getiv) {
+        int32_t ok = 0;
+        getiv(sh, 0x8B81 /* GL_COMPILE_STATUS */, &ok);
+        if (!ok) {
+            char why[256] = "";
+            if (getlog) getlog(sh, (int32_t)sizeof why - 1, NULL, why);
+            tl_log_line("ov: %s shader FAILED to compile: %s",
+                        kind == 0x8B31 ? "vertex" : "fragment", why);
+        }
+    }
     return sh;
 }
 
@@ -598,6 +614,19 @@ static void ov_init_flip(overlay *o, bool bottom_up)
     attach(o->prog, ov_shader(0x8B30, fs));
     bindAttrib(o->prog, 0, "p");
     link(o->prog);
+    {
+        void (*getiv)(uint32_t, uint32_t, int32_t *) = gl_fn("glGetProgramiv");
+        void (*getlog)(uint32_t, int32_t, int32_t *, char *) = gl_fn("glGetProgramInfoLog");
+        if (getiv) {
+            int32_t ok = 0;
+            getiv(o->prog, 0x8B82 /* GL_LINK_STATUS */, &ok);
+            if (!ok) {
+                char why[256] = "";
+                if (getlog) getlog(o->prog, (int32_t)sizeof why - 1, NULL, why);
+                tl_log_line("ov: program FAILED to link: %s", why);
+            }
+        }
+    }
     genTex(1, &o->tex);
     static const float quad[] = { -1, -1, 1, -1, -1, 1, 1, 1 };
     genBuf(1, &o->vbo);
@@ -650,6 +679,38 @@ static void ov_draw(overlay *o, int vw, int vh)
     attrPtr(0, 2, 0x1406, 0, 0, NULL);
     enableAttr(0);
     draw(0x0005, 0, 4);
+}
+
+/* What the drawable actually holds, as opposed to what the view system handed
+ * over (the source of ov_upload). Those two answers separate the two failures
+ * that look identical from outside: a lit CPU buffer with a black drawable is
+ * ANGLE/Metal not drawing the quad; a lit drawable with a black screen is the
+ * compositor not showing the layer. Three sample rows in the middle, so the
+ * cost is a few hundred bytes and never touches the frame rate.
+ *
+ * This reads the default framebuffer, which ANGLE implements as a blit off the
+ * drawable's texture -- so the layer must allow more than framebuffer-only
+ * rendering (TLUnityUIView sets framebufferOnly = false for exactly this). */
+static void gpu_probe(int vw, int vh, unsigned long fn)
+{
+    void (*readPixels)(int32_t, int32_t, int32_t, int32_t, uint32_t, uint32_t, void *) = gl_fn("glReadPixels");
+    if (!readPixels || vw <= 0 || vh <= 0) return;
+    enum { N = 96 };
+    static uint8_t row[N * 4];
+    size_t total = 0, lit = 0, opaque = 0;
+    int x0 = (vw - N) / 2; if (x0 < 0) x0 = 0;
+    for (int k = 1; k <= 3; k++) {
+        int y = vh * k / 4;
+        memset(row, 0, sizeof row);
+        readPixels(x0, y, N, 1, 0x1908, 0x1401, row);
+        for (int i = 0; i < N; i++) {
+            total++;
+            if (row[i * 4 + 3]) opaque++;
+            if (row[i * 4] | row[i * 4 + 1] | row[i * 4 + 2]) lit++;
+        }
+    }
+    tl_log_line("gpu: readback at frame %lu (%dx%d): %zu%% opaque, %zu%% not black",
+                fn, vw, vh, total ? opaque * 100 / total : 0, total ? lit * 100 / total : 0);
 }
 
 /* ---- EGL for the app's own threads (a GLSurfaceView copied into the app, an engine's GL thread, EGL14 users)
@@ -1064,6 +1125,18 @@ static void *gl_main(void *arg)
             if (!app) app_frame_draw(&appov, &appup, A.cfg.width, A.cfg.height);
             bool drew_views = tl_ui_has_frame();
             if (drew_views) ov_draw(&ov, A.cfg.width, A.cfg.height);
+            /* What actually reached the drawable, and whatever error the overlay
+               draw left behind -- read before the swap, on the ui context. */
+            uint64_t fn_now = atomic_load(&A.frames) + 1;
+            if (drew_views && (fn_now <= 3 || fn_now == 60 || fn_now == 240)) {
+                unsigned (*glError)(void) = gl_fn("glGetError");
+                if (glError) {
+                    unsigned e = glError();
+                    if (e) tl_log_line("gpu: overlay draw left GL error %#x (frame %llu)",
+                                       e, (unsigned long long)fn_now);
+                }
+                gpu_probe(A.cfg.width, A.cfg.height, (unsigned long)fn_now);
+            }
             unsigned swap_ok = swapBuffers(dpy, surf);
             unsigned long fn = atomic_fetch_add(&A.frames, 1) + 1;
             if (fn <= 3 || fn % 300 == 0)

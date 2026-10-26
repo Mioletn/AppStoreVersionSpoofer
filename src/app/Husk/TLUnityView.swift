@@ -82,7 +82,12 @@ final class TLUnityUIView: UIView, UIKeyInput {
         contentScaleFactor = scale
         if let metal = layer as? CAMetalLayer {
             metal.pixelFormat = .bgra8Unorm
-            metal.framebufferOnly = true
+            // Not framebufferOnly: the runtime reads the drawable back a few
+            // times a run to log what actually reached it. With the flag set,
+            // Metal refuses the blit and a diagnostic would report a black
+            // drawable that is not black -- the one reading that must be right.
+            // A full-screen quad loses nothing measurable by allowing it.
+            metal.framebufferOnly = false
             metal.contentsScale = scale
             metal.isOpaque = true
         }
