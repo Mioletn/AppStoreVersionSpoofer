@@ -441,8 +441,9 @@ FILES = [
     ("mtl_context_device.mm", '#include "libANGLE/renderer/metal/mtl_context_device.h"\n',
      [CONTEXT_DEVICE_PATCH]),
     ("mtl_command_buffer.mm", "#include <type_traits>\n",
-     [RASTERIZATION_RATE_MAP_PATCH, MEMORY_BARRIER_PATCH]),
-    ("mtl_state_cache.mm", "#include <sstream>\n", [STORE_ACTION_OPTIONS_PATCH, USERESOURCE_STAGES_PATCH, BARRIER_STAGES_PATCH, BARRIER_RESOURCE_STAGES_PATCH]),
+     [RASTERIZATION_RATE_MAP_PATCH, MEMORY_BARRIER_PATCH, USERESOURCE_STAGES_PATCH,
+      BARRIER_STAGES_PATCH, BARRIER_RESOURCE_STAGES_PATCH]),
+    ("mtl_state_cache.mm", "#include <sstream>\n", [STORE_ACTION_OPTIONS_PATCH]),
     ("mtl_resources.mm", "#include <TargetConditionals.h>\n", [SWIZZLE_VIEW_PATCH]),
 ]
 
