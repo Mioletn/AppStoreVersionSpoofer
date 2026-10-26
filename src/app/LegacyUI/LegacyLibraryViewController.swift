@@ -70,6 +70,45 @@ final class LegacyLibraryViewController: UIViewController {
         // launch from an App Clip icon) is opened here, once the Library is on
         // screen and can actually present it.
         openPendingDeepLink()
+        adoptDroppedAPKs()
+    }
+
+    /// An APK left in the Husk folder -- dropped there through the Files app or
+    /// copied in over iTunes file sharing -- is imported, the way the iOS 15
+    /// screen's drop target imports one. The legacy shell had no such path: the
+    /// + picker was the only way in.
+    ///
+    /// One file at a time, and each file once: the import copies rather than
+    /// moves, so without a record of what has been taken the same APK would be
+    /// imported again on every appearance.
+    private var adoptingDropped = false
+    private func adoptDroppedAPKs() {
+        guard !adoptingDropped else { return }
+        guard let docs = FileManager.default.urls(for: .documentDirectory,
+                                                  in: .userDomainMask).first else { return }
+        let exts = ["apk", "xapk", "apkm", "apks"]
+        let dropped = ((try? FileManager.default.contentsOfDirectory(
+            at: docs, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? [])
+            .filter { exts.contains($0.pathExtension.lowercased()) }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+
+        let key = "husk.legacy.adoptedPackages"
+        var adopted = Set(UserDefaults.standard.stringArray(forKey: key) ?? [])
+        guard let next = dropped.first(where: { !adopted.contains($0.lastPathComponent) })
+        else { return }
+
+        adoptingDropped = true
+        adopted.insert(next.lastPathComponent)
+        UserDefaults.standard.set(Array(adopted), forKey: key)
+        HuskLog.log("ui", "legacy: importing \(next.lastPathComponent) from the Husk folder")
+
+        store.importAPKs([next]) { [weak self] _ in
+            guard let self else { return }
+            self.adoptingDropped = false
+            self.refresh()
+            HuskLog.log("ui", "legacy: import done, \(self.store.apps.count) app(s) in the library")
+            self.adoptDroppedAPKs()          // the next one, if several were dropped
+        }
     }
 
     /// A link that arrives while the app is already running. Registered in

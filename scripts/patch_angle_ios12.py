@@ -273,9 +273,49 @@ SWIZZLE_VIEW_PATCH = (
 """,
 )
 
+
+# Metal reports warnings through the same NSError failures arrive in.
+#
+# iOS 12.2's Metal compiles ANGLE's MSL with one warning -- the generated
+# expression list carries [[barycentric_coord]], an attribute Metal 2.0 does not
+# know -- and the code below treats any non-nil error as a failed compile. The
+# result is that EVERY program fails to link:
+#
+#   ov: program FAILED to link: Internal error while linking shader. MSL
+#   compilation error: Compilation succeeded with:
+#   program_source:99:294: warning: unknown attribute 'barycentric_coord' ignored
+#
+# glUseProgram then raises GL_INVALID_OPERATION (0x502), nothing is drawn, and
+# every frame is the clear colour: a black screen with an honest frame count, on
+# every engine that draws through ANGLE. A library that was produced is a
+# library that works; the warning is kept for the log and dropped as a failure.
+MSL_WARNING_PATCH = (
+    r"""        if (angle::GetBoolEnvironmentVar(kANGLEPrintMSLEnv))
+        {
+            NSLog(@"%@\n", nsSource.get());
+        }
+        *errorOut = std::move(nsError);
+""",
+    r"""        if (angle::GetBoolEnvironmentVar(kANGLEPrintMSLEnv))
+        {
+            NSLog(@"%@\n", nsSource.get());
+        }
+        // husk: ios12 -- a warning is not a failure. Metal sets this error for
+        // compile warnings too (MTLLibraryErrorCompileWarning) while still
+        // returning a usable library; treating it as fatal fails every shader
+        // on 12.2, whose Metal does not recognise [[barycentric_coord]].
+        if (result.get() != nil && nsError != nil)
+        {
+            NSLog(@"ANGLE: MSL compiled with warnings: %@", nsError.localizedDescription);
+            nsError = nil;
+        }
+        *errorOut = std::move(nsError);
+""",
+)
+
 FILES = [
     ("mtl_utils.mm", "#include <TargetConditionals.h>\n",
-     [(MTL_UTILS_OLD, MTL_UTILS_NEW), SHADER_LIBRARY_PATCH]),
+     [(MTL_UTILS_OLD, MTL_UTILS_NEW), SHADER_LIBRARY_PATCH, MSL_WARNING_PATCH]),
     ("DisplayMtl.mm", "#include <sys/param.h>\n", DISPLAY_PATCHES),
     ("mtl_context_device.mm", '#include "libANGLE/renderer/metal/mtl_context_device.h"\n',
      [CONTEXT_DEVICE_PATCH]),
