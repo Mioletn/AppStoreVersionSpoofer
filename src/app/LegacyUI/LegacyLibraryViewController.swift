@@ -53,12 +53,42 @@ final class LegacyLibraryViewController: UIViewController {
 
         store.reload()
         refresh()
+
+        NotificationCenter.default.addObserver(self, selector: #selector(deepLinkFired),
+                                              name: LegacyDeepLink.opened, object: nil)
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         store.reload()
         refresh()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        // A husk://open_app link that arrived before this screen existed (a cold
+        // launch from an App Clip icon) is opened here, once the Library is on
+        // screen and can actually present it.
+        openPendingDeepLink()
+    }
+
+    /// A link that arrives while the app is already running. Registered in
+    /// viewDidLoad, removed when this controller goes away.
+    @objc private func deepLinkFired() { openPendingDeepLink() }
+
+    private func openPendingDeepLink() {
+        guard let id = LegacyDeepLink.pending else { return }
+        LegacyDeepLink.pending = nil
+        guard presentedViewController == nil else {
+            HuskLog.log("ui", "legacy deep link: something is already presented; dropping \(id)")
+            return
+        }
+        guard let app = store.apps.first(where: { $0.id == id }) else {
+            HuskLog.log("ui", "legacy deep link: \(id) is not in the library")
+            return
+        }
+        HuskLog.log("ui", "legacy deep link: opening \(app.label)")
+        run(app)
     }
 
     private func refresh() {
@@ -213,5 +243,37 @@ final class LegacyAppCell: UITableViewCell {
         }
         detail.text = line
         icon.image = store.icon(for: app)
+    }
+}
+
+// MARK: - husk://open_app on the iOS 12 shell
+
+/// `husk://open_app?unique_identifier=<id>`: the App Clip's Home Screen icon
+/// sends this, and on iOS 15 the SwiftUI router answers it (AppClip.handle).
+/// The legacy shell has no router, so the app delegate used to log the URL and
+/// open the Library instead -- the app launched, which is all the profile
+/// installation needed, but not the game the icon named.
+///
+/// Kept in this file rather than its own: a new source file only reaches the
+/// target when the project is regenerated from project.yml, and a build that
+/// used the checked-in project instead would fail to link it.
+enum LegacyDeepLink {
+    static let opened = Notification.Name("husk.legacy.deepLink")
+
+    /// Set by the app delegate when the URL arrives before the Library exists
+    /// (a cold launch from an icon), consumed the first time it appears.
+    static var pending: String?
+
+    static func handle(_ url: URL) -> Bool {
+        guard url.scheme?.lowercased() == "husk",
+              url.host?.lowercased() == "open_app",
+              let id = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                    .queryItems?.first(where: { $0.name == "unique_identifier" })?.value,
+              !id.isEmpty
+        else { return false }
+        HuskLog.log("ui", "legacy deep link: \(id)")
+        pending = id
+        NotificationCenter.default.post(name: opened, object: id)
+        return true
     }
 }

@@ -117,8 +117,7 @@ final class HuskAppDelegate: NSObject, UIApplicationDelegate {
     /// is the part the profile installation depends on.
     func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
         guard #available(iOS 15.0, *) else {
-            HuskLog.log("ui", "app clip: \(url.absoluteString) -- the legacy shell opens the library instead")
-            return false
+            return LegacyDeepLink.handle(url)
         }
         return AppClip.handle(url)
     }
