@@ -314,6 +314,63 @@ MSL_WARNING_PATCH = (
 )
 
 
+# The two barrier calls that name render stages are iOS 13 as well, and only reached by a 3.1 context's
+# glMemoryBarrier -- but a selector that is missing aborts the process rather than failing the call, so
+# they are answered the way 12.2 can answer them too.
+BARRIER_STAGES_PATCH = (
+    """    [encoder memoryBarrierWithScope:scope afterStages:after beforeStages:before];""",
+    """    // husk: ios12 -- the stages: forms are iOS 13.
+    if ([encoder respondsToSelector:@selector(memoryBarrierWithScope:afterStages:beforeStages:)])
+    {
+        [encoder memoryBarrierWithScope:scope afterStages:after beforeStages:before];
+    }
+    else
+    {
+        [encoder memoryBarrierWithScope:scope];
+    }""",
+)
+
+BARRIER_RESOURCE_STAGES_PATCH = (
+    """    [encoder memoryBarrierWithResources:&resource count:1 afterStages:after beforeStages:before];""",
+    """    // husk: ios12 -- as above.
+    if ([encoder respondsToSelector:@selector(memoryBarrierWithResources:count:afterStages:beforeStages:)])
+    {
+        [encoder memoryBarrierWithResources:&resource count:1 afterStages:after beforeStages:before];
+    }
+    else
+    {
+        [encoder memoryBarrierWithResources:&resource count:1];
+    }""",
+)
+
+# -useResource:usage:stages: arrived with iOS 13, and 12.2's AGX driver does not implement it: the
+# message goes to the render context, is unrecognised, and NSInvalidArgumentException is raised from
+# inside a draw, which aborts the process. Unity reached its first clear and died there:
+#
+#   *** Terminating app due to uncaught exception 'NSInvalidArgumentException', reason:
+#   '-[AGXA12FamilyRenderContext useResource:usage:stages:]: unrecognized selector sent to instance'
+#   rx::mtl::RenderCommandEncoder::encodeMetalEncoder  <- ContextMtl::endEncoding
+#   gl::Framebuffer::syncState <- gl::Context::clear
+#
+# -useResource:usage: (iOS 11) is the same statement without the stage mask: it marks the resource as
+# read or written for the whole draw, which is what a 12.2 device can express.
+USERESOURCE_STAGES_PATCH = (
+    """    MTLRenderStages stages   = stream->fetch<MTLRenderStages>();
+    [encoder useResource:resource usage:usage stages:stages];
+    [resource ANGLE_MTL_RELEASE];""",
+    """    MTLRenderStages stages   = stream->fetch<MTLRenderStages>();
+    // husk: ios12 -- the stages: form is iOS 13; see the note in patch_angle_ios12.py.
+    if ([encoder respondsToSelector:@selector(useResource:usage:stages:)])
+    {
+        [encoder useResource:resource usage:usage stages:stages];
+    }
+    else
+    {
+        [encoder useResource:resource usage:usage];
+    }
+    [resource ANGLE_MTL_RELEASE];""",
+)
+
 # MTLPixelFormatDepth16Unorm arrived with iOS 13. On 12.2 Metal does not know
 # the value (250) and -validateMTLPixelFormat: asserts at texture creation, from
 # inside the draw call, which aborts the process:
@@ -385,7 +442,7 @@ FILES = [
      [CONTEXT_DEVICE_PATCH]),
     ("mtl_command_buffer.mm", "#include <type_traits>\n",
      [RASTERIZATION_RATE_MAP_PATCH, MEMORY_BARRIER_PATCH]),
-    ("mtl_state_cache.mm", "#include <sstream>\n", [STORE_ACTION_OPTIONS_PATCH]),
+    ("mtl_state_cache.mm", "#include <sstream>\n", [STORE_ACTION_OPTIONS_PATCH, USERESOURCE_STAGES_PATCH, BARRIER_STAGES_PATCH, BARRIER_RESOURCE_STAGES_PATCH]),
     ("mtl_resources.mm", "#include <TargetConditionals.h>\n", [SWIZZLE_VIEW_PATCH]),
 ]
 
