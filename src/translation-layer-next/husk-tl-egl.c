@@ -511,42 +511,6 @@ static void w_glVertexAttribPointer(unsigned i, int s, unsigned t, unsigned n, i
     }
     r_glVertexAttribPointer(i, s, t, n & 0xff, st, p);
 }
-/* ES 3.1's vertex-binding API. ANGLE's Metal backend is a 3.0 renderer, so these calls reach a context
- * that does not implement them; a log of the first few says which path an engine took, which is the
- * difference between "it used the 3.1 API and needs it emulated" and "it never called it". */
-#define HUSK_LOG_31(fnname, fmt, ...) \
-    do { static atomic_int n; if (atomic_fetch_add(&n, 1) < 24) tl_log_line("gl: " fnname fmt, __VA_ARGS__); } while (0)
-static void (*r_glBindVertexBuffer)(unsigned, unsigned, long, int);
-static void w_glBindVertexBuffer(unsigned b, unsigned buf, long off, int stride)
-{
-    HUSK_LOG_31("glBindVertexBuffer", "(binding %u, buffer %u, offset %ld, stride %d)", b, buf, off, stride);
-    if (r_glBindVertexBuffer) r_glBindVertexBuffer(b, buf, off, stride);
-}
-static void (*r_glVertexAttribFormat)(unsigned, int, unsigned, unsigned char, unsigned);
-static void w_glVertexAttribFormat(unsigned a, int size, unsigned type, unsigned char norm, unsigned rel)
-{
-    HUSK_LOG_31("glVertexAttribFormat", "(attrib %u, %d, %#x, norm %u, offset %u)", a, size, type, norm, rel);
-    if (r_glVertexAttribFormat) r_glVertexAttribFormat(a, size, type, norm, rel);
-}
-static void (*r_glVertexAttribIFormat)(unsigned, int, unsigned, unsigned);
-static void w_glVertexAttribIFormat(unsigned a, int size, unsigned type, unsigned rel)
-{
-    HUSK_LOG_31("glVertexAttribIFormat", "(attrib %u, %d, %#x, offset %u)", a, size, type, rel);
-    if (r_glVertexAttribIFormat) r_glVertexAttribIFormat(a, size, type, rel);
-}
-static void (*r_glVertexAttribBinding)(unsigned, unsigned);
-static void w_glVertexAttribBinding(unsigned a, unsigned b)
-{
-    HUSK_LOG_31("glVertexAttribBinding", "(attrib %u, binding %u)", a, b);
-    if (r_glVertexAttribBinding) r_glVertexAttribBinding(a, b);
-}
-static void (*r_glVertexBindingDivisor)(unsigned, unsigned);
-static void w_glVertexBindingDivisor(unsigned b, unsigned d)
-{
-    HUSK_LOG_31("glVertexBindingDivisor", "(binding %u, divisor %u)", b, d);
-    if (r_glVertexBindingDivisor) r_glVertexBindingDivisor(b, d);
-}
-
 static void (*r_glUniformMatrix2fv)(int, int, unsigned, const float *);
 static void w_glUniformMatrix2fv(int l, int c, unsigned t, const float *v) { r_glUniformMatrix2fv(l, c, t & 0xff, v); }
 static void (*r_glUniformMatrix3fv)(int, int, unsigned, const float *);
@@ -684,11 +648,144 @@ static EGLint w_eglClientWaitSync(EGLDisplay d, void *s, EGLint f, uint64_t t)
 }
 static EGLBoolean w_eglDestroySync(EGLDisplay d, void *s) { return s ? r_eglDestroySync(d, s) : EGL_FALSE; }
 
+/* ------------------------------------------------- ES 3.1's vertex-binding API, on a 3.0 renderer
+
+ * ANGLE's Metal backend is a GL ES 3.0 renderer (mtl_common.h: kMaxSupportedGLVersion is 3,0), and Unreal's
+ * 3.1 path declares every attribute and buffer with the 3.1 calls: glVertexAttribFormat, glVertexAttribBinding,
+ * glBindVertexBuffer. A 3.0 context has none of them, so each call is a GL error and the attribute stays
+ * client-side with no pointer at all -- which is the memcpy from address 0 in rx::StreamVertexData that killed
+ * the first draw. (glVertexAttribPointer(NULL) is not what happened: the log says those calls never occurred.)
+ *
+ * Each 3.1 declaration is translated into the 3.0 pair it stands for: bind the buffer to GL_ARRAY_BUFFER and
+ * call glVertexAttribPointer against the vertex array that is bound, which is where 3.0 keeps an attribute's
+ * format, buffer, stride and offset together. The 3.1 declarations are remembered per vertex array, so a later
+ * glBindVertexBuffer with a new offset re-issues the pointer for every attribute on that binding -- which is
+ * how a 3.1 engine streams its vertices. */
+typedef struct { int size; unsigned type; unsigned char norm; unsigned rel; int binding; int isInt; } va_fmt_t;
+typedef struct { unsigned buf; long off; int stride; int divisor; } va_bind_t;
+#define VA_ATTRIBS 32
+#define VA_BINDINGS 16
+#define VA_ARRAYS 8
+typedef struct { unsigned vao; bool used; va_fmt_t fmt[VA_ATTRIBS]; va_bind_t bind[VA_BINDINGS]; } va_state;
+static va_state g_va[VA_ARRAYS];
+static unsigned g_va_current;
+static pthread_mutex_t g_va_mu = PTHREAD_MUTEX_INITIALIZER;
+
+static va_state *va_slot(unsigned vao, bool create)
+{
+    for (int i = 0; i < VA_ARRAYS; i++) if (g_va[i].used && g_va[i].vao == vao) return &g_va[i];
+    if (!create) return NULL;
+    for (int i = 0; i < VA_ARRAYS; i++) if (!g_va[i].used) {
+        memset(&g_va[i], 0, sizeof g_va[i]);
+        g_va[i].used = true; g_va[i].vao = vao;
+        for (int a = 0; a < VA_ATTRIBS; a++) g_va[i].fmt[a].binding = -1;
+        return &g_va[i];
+    }
+    return NULL;
+}
+
+static void (*r_glVertexAttribIPointer)(unsigned, int, unsigned, int, const void *);
+static void w_glVertexAttribIPointer(unsigned i, int sz, unsigned t, int st, const void *p) { if (r_glVertexAttribIPointer) r_glVertexAttribIPointer(i, sz, t, st, p); }
+static void (*r_glVertexAttribDivisor)(unsigned, unsigned);
+static void w_glVertexAttribDivisor(unsigned i, unsigned d) { if (r_glVertexAttribDivisor) r_glVertexAttribDivisor(i, d); }
+static void (*r_glBindVertexArray)(unsigned);
+
+/* One attribute, as the bound vertex array would have been told by glVertexAttribPointer. */
+static void va_apply(va_state *st, int attrib)
+{
+    if (!st || attrib < 0 || attrib >= VA_ATTRIBS || !r_glVertexAttribPointer || !r_glBindBuffer) return;
+    va_fmt_t *f = &st->fmt[attrib];
+    if (f->binding < 0 || !f->size) return;
+    if (f->binding >= VA_BINDINGS) return;
+    va_bind_t *b = &st->bind[f->binding];
+    if (!b->buf) return;
+    int prev = 0;
+    if (r_glGetIntegerv) r_glGetIntegerv(0x8894 /* GL_ARRAY_BUFFER_BINDING */, &prev);
+    r_glBindBuffer(0x8892 /* GL_ARRAY_BUFFER */, b->buf);
+    const void *ptr = (const void *)(uintptr_t)(b->off + (long)f->rel);
+    if (f->isInt && r_glVertexAttribIPointer)
+        r_glVertexAttribIPointer((unsigned)attrib, f->size, f->type, b->stride, ptr);
+    else
+        r_glVertexAttribPointer((unsigned)attrib, f->size, f->type, f->norm, b->stride, ptr);
+    if (r_glVertexAttribDivisor) r_glVertexAttribDivisor((unsigned)attrib, (unsigned)b->divisor);
+    r_glBindBuffer(0x8892, (unsigned)prev);
+}
+
+static void w_glBindVertexArray(unsigned vao)
+{
+    if (r_glBindVertexArray) r_glBindVertexArray(vao);
+    pthread_mutex_lock(&g_va_mu);
+    g_va_current = vao;
+    va_slot(vao, true);
+    pthread_mutex_unlock(&g_va_mu);
+}
+
+static void (*r_glBindVertexBuffer)(unsigned, unsigned, long, int);
+static void w_glBindVertexBuffer(unsigned b, unsigned buf, long off, int stride)
+{
+    pthread_mutex_lock(&g_va_mu);
+    va_state *st = va_slot(g_va_current, true);
+    if (st && b < VA_BINDINGS) {
+        st->bind[b].buf = buf; st->bind[b].off = off; st->bind[b].stride = stride;
+        for (int a = 0; a < VA_ATTRIBS; a++) if (st->fmt[a].binding == (int)b) va_apply(st, a);
+    }
+    pthread_mutex_unlock(&g_va_mu);
+    static atomic_int said;
+    if (atomic_fetch_add(&said, 1) == 0)
+        tl_log_line("gl: ES 3.1 vertex bindings translated to 3.0 state (glBindVertexBuffer binding %u, buffer %u, offset %ld, stride %d)", b, buf, off, stride);
+}
+
+static void (*r_glVertexAttribFormat)(unsigned, int, unsigned, unsigned char, unsigned);
+static void w_glVertexAttribFormat(unsigned a, int size, unsigned type, unsigned char norm, unsigned rel)
+{
+    pthread_mutex_lock(&g_va_mu);
+    va_state *st = va_slot(g_va_current, true);
+    if (st && a < VA_ATTRIBS) {
+        st->fmt[a].size = size; st->fmt[a].type = type; st->fmt[a].norm = norm; st->fmt[a].rel = rel; st->fmt[a].isInt = 0;
+        va_apply(st, (int)a);
+    }
+    pthread_mutex_unlock(&g_va_mu);
+}
+
+static void (*r_glVertexAttribIFormat)(unsigned, int, unsigned, unsigned);
+static void w_glVertexAttribIFormat(unsigned a, int size, unsigned type, unsigned rel)
+{
+    pthread_mutex_lock(&g_va_mu);
+    va_state *st = va_slot(g_va_current, true);
+    if (st && a < VA_ATTRIBS) {
+        st->fmt[a].size = size; st->fmt[a].type = type; st->fmt[a].norm = 0; st->fmt[a].rel = rel; st->fmt[a].isInt = 1;
+        va_apply(st, (int)a);
+    }
+    pthread_mutex_unlock(&g_va_mu);
+}
+
+static void (*r_glVertexAttribBinding)(unsigned, unsigned);
+static void w_glVertexAttribBinding(unsigned a, unsigned b)
+{
+    pthread_mutex_lock(&g_va_mu);
+    va_state *st = va_slot(g_va_current, true);
+    if (st && a < VA_ATTRIBS && b < VA_BINDINGS) { st->fmt[a].binding = (int)b; va_apply(st, (int)a); }
+    pthread_mutex_unlock(&g_va_mu);
+}
+
+static void (*r_glVertexBindingDivisor)(unsigned, unsigned);
+static void w_glVertexBindingDivisor(unsigned b, unsigned d)
+{
+    pthread_mutex_lock(&g_va_mu);
+    va_state *st = va_slot(g_va_current, true);
+    if (st && b < VA_BINDINGS) {
+        st->bind[b].divisor = (int)d;
+        for (int a = 0; a < VA_ATTRIBS; a++) if (st->fmt[a].binding == (int)b && r_glVertexAttribDivisor)
+            r_glVertexAttribDivisor((unsigned)a, d);
+    }
+    pthread_mutex_unlock(&g_va_mu);
+}
+
 #define ADAPT(name) { #name, (void *)w_##name, (void **)&r_##name }
 static const struct { const char *name; void *wrap; void **real; } k_adapt[] = {
     ADAPT(glBlitFramebuffer), ADAPT(glTexSubImage3D), ADAPT(glCompressedTexSubImage3D), ADAPT(glCopyImageSubData),
     ADAPT(glColorMask), ADAPT(glDepthMask), ADAPT(glVertexAttribPointer), ADAPT(glUniformMatrix2fv),
-    ADAPT(glUniformMatrix3fv), ADAPT(glUniformMatrix4fv), ADAPT(glSampleCoverage), ADAPT(glBindVertexBuffer), ADAPT(glVertexAttribFormat), ADAPT(glVertexAttribIFormat), ADAPT(glVertexAttribBinding), ADAPT(glVertexBindingDivisor), ADAPT(glGetString), ADAPT(glGetStringi), ADAPT(glCompileShader), ADAPT(glShaderSource), ADAPT(glAttachShader), ADAPT(glLinkProgram), ADAPT(glGetIntegerv), ADAPT(glBindBufferBase), ADAPT(glBindBuffer), ADAPT(glBufferData), ADAPT(glBufferSubData), ADAPT(glBindBufferRange),
+    ADAPT(glUniformMatrix3fv), ADAPT(glUniformMatrix4fv), ADAPT(glSampleCoverage), ADAPT(glBindVertexBuffer), ADAPT(glVertexAttribIPointer), ADAPT(glVertexAttribDivisor), ADAPT(glBindVertexArray), ADAPT(glVertexAttribFormat), ADAPT(glVertexAttribIFormat), ADAPT(glVertexAttribBinding), ADAPT(glVertexBindingDivisor), ADAPT(glGetString), ADAPT(glGetStringi), ADAPT(glCompileShader), ADAPT(glShaderSource), ADAPT(glAttachShader), ADAPT(glLinkProgram), ADAPT(glGetIntegerv), ADAPT(glBindBufferBase), ADAPT(glBindBuffer), ADAPT(glBufferData), ADAPT(glBufferSubData), ADAPT(glBindBufferRange),
     ADAPT(eglClientWaitSyncKHR), ADAPT(eglDestroySyncKHR), ADAPT(eglGetSyncAttribKHR), ADAPT(eglClientWaitSync), ADAPT(eglDestroySync),
 };
 
