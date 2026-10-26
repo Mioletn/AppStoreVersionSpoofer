@@ -1070,6 +1070,8 @@ static void *gl_main(void *arg)
 
     jobj *gl10 = NULL;
     jvalue p1[1];
+    /* Set while the host is showing the view system's bitmap through UIKit. */
+    bool uikit_shown = false;
     int64_t next = now_ns();
     while (!atomic_load(&A.ended)) {
         if (atomic_load(&A.paused)) { usleep(20000); next = now_ns(); continue; }
@@ -1109,10 +1111,20 @@ static void *gl_main(void *arg)
             makeCurrent(dpy, surf, surf, ui);
             if (any) ov_upload(&ov, px, fw, fh);
             else ov.tw = ov.th = 0;
-            /* See husk_ui_present_bitmap above: no GLSurfaceView means the whole
-               screen is the view system's bitmap, so UIKit can carry it. */
-            if (any && !A.gl_renderer) husk_ui_present_bitmap(px, fw, fh, fs);
+            /* See husk_ui_present_bitmap above. Only while the app has no GL of
+               its own: an engine's own surface (SDL, Unity) and a GLSurfaceView
+               both put the picture in the drawable, and an opaque layer over it
+               would hide the game instead of showing its UI. */
+            if (any && !A.gl_renderer && !app_frame_on()) {
+                husk_ui_present_bitmap(px, fw, fh, fs);
+                uikit_shown = true;
+            }
             tl_ui_frame_done();
+        }
+        /* The moment anything draws through GL, take that layer away again. */
+        if (uikit_shown && (A.gl_renderer || app_frame_on())) {
+            husk_ui_present_bitmap(NULL, 0, 0, 0);
+            uikit_shown = false;
         }
         if (app) {
             makeCurrent(dpy, surf, surf, app);

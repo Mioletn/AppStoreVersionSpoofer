@@ -291,6 +291,10 @@ final class TLUnityUIView: UIView, UIKeyInput {
         huskJavaFramePump.present = { [weak self] data, w, h in
             self?.showJavaFrame(data, w, h)
         }
+        huskJavaFramePump.onClear = { [weak self] in
+            self?.javaLayer?.isHidden = true
+            self?.javaLayer?.contents = nil
+        }
     }
 
     private func showJavaFrame(_ data: Data, _ w: Int, _ h: Int) {
@@ -1201,6 +1205,8 @@ final class JavaFramePump {
     private var busy = false
     /// Runs on the main thread with (pixels, width, height).
     var present: ((Data, Int, Int) -> Void)?
+    /// Runs on the main thread when the layer should disappear.
+    var onClear: (() -> Void)?
 
     func push(_ src: UnsafePointer<UInt8>, _ w: Int, _ h: Int, _ stride: Int) {
         lock.lock()
@@ -1229,10 +1235,22 @@ final class JavaFramePump {
 /// One native runtime per process, so one pump.
 let huskJavaFramePump = JavaFramePump()
 
+extension JavaFramePump {
+    /// Take the layer off the screen (the app started drawing through GL).
+    func clear() {
+        DispatchQueue.main.async { [weak self] in self?.onClear?() }
+    }
+}
+
 /// `husk_ui_present_bitmap(px, w, h, stride)`, for the C render loop (see
 /// husk-tl-dvm-android.c). Called on the runtime's render thread.
 @_cdecl("husk_ui_present_bitmap")
 public func husk_ui_present_bitmap(_ px: UnsafePointer<UInt8>?, _ w: Int32, _ h: Int32, _ stride: Int32) {
-    guard let px, w > 0, h > 0, stride >= w * 4 else { return }
+    // A null frame is the runtime saying the app has GL of its own now, so this
+    // layer has to come off: it would otherwise sit on top of the game.
+    guard let px, w > 0, h > 0, stride >= w * 4 else {
+        huskJavaFramePump.clear()
+        return
+    }
     huskJavaFramePump.push(px, Int(w), Int(h), Int(stride))
 }
