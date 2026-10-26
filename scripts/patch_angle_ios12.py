@@ -326,7 +326,9 @@ BARRIER_STAGES_PATCH = (
     }
     else
     {
-        [encoder memoryBarrierWithScope:scope];
+        // There is no unscoped form on a render encoder in this SDK, and nothing to replace it
+        // with on 12.2: the encoder is one thread's, and ANGLE's barriers order its own stages.
+        (void)scope;
     }""",
 )
 
@@ -339,7 +341,7 @@ BARRIER_RESOURCE_STAGES_PATCH = (
     }
     else
     {
-        [encoder memoryBarrierWithResources:&resource count:1];
+        (void)resource;
     }""",
 )
 
