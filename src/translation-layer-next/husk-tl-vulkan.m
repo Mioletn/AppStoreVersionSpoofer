@@ -71,8 +71,16 @@ static void vk_load(void)
      * has no way back from VK_ERROR_DEVICE_LOST: DXVK reports it as a removed device and the game ends itself. Read once, when MoltenVK first needs its settings. */
     setenv("MVK_CONFIG_RESUME_LOST_DEVICE", "1", 0);
     V.lib = V.have_path ? dlopen(V.path, RTLD_NOW | RTLD_LOCAL) : RTLD_DEFAULT;
+    /* dlerror() has to be read before anything else touches dl, or it is cleared. */
+    const char *why = V.lib ? NULL : dlerror();
     V.gipa = V.lib ? (pfn_gipa)dlsym(V.lib, "vkGetInstanceProcAddr") : NULL;
-    tl_log_line("vulkan: %s", V.gipa ? (V.have_path ? V.path : "MoltenVK linked into the process") : "MoltenVK not found");
+    if (V.gipa)
+        tl_log_line("vulkan: %s", V.have_path ? V.path : "MoltenVK linked into the process");
+    else
+        /* The path and the loader's own words: "not found" alone leaves a broken framework, an unreadable path and a
+         * signature the loader refused all looking alike. */
+        tl_log_line("vulkan: MoltenVK not available (%s): %s", V.have_path ? V.path : "no path configured",
+                    why ? why : (V.lib ? "loaded, but no vkGetInstanceProcAddr in it" : "unknown"));
 }
 static bool vk_ready(void) { pthread_once(&V.once, vk_load); return V.gipa != NULL; }
 bool tl_vk_available(void) { return V.have_path && vk_ready(); }

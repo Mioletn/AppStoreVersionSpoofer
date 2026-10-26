@@ -1398,17 +1398,17 @@ typedef struct {
 _Static_assert(__builtin_offsetof(guest_ucontext, uc_mcontext) == 176, "bionic's ucontext_t puts uc_mcontext at 176");
 _Static_assert(__builtin_offsetof(guest_sigcontext, reserved) == 288, "the kernel's sigcontext puts __reserved at 288");
 
-static void host_signal_entry(int dsig, siginfo_t *info, void *uctx)
+/* Runs the guest's handler with a context built from Darwin's, and copies its register changes back. Returns false when the
+ * guest has no handler for this signal, so a caller that chained in front of something else can pass the fault along. */
+static bool deliver_to_guest(int gsig, siginfo_t *info, void *uctx)
 {
-    int gsig = tl_signal_from_darwin(dsig);
-    sig_trace("delivered", gsig);
     void *h = g_guest_sig[gsig < 32 ? gsig : 0].handler;
-    if (!h || h == (void *)1) return;
+    if (!h || h == (void *)1) return false;
     ucontext_t *uc = uctx;
-    if (!uc || !uc->uc_mcontext) { ((guest_handler)h)(gsig, info, uctx); return; }
+    if (!uc || !uc->uc_mcontext) { ((guest_handler)h)(gsig, info, uctx); return true; }
     static __thread guest_ucontext *g;     /* 4.5 KiB: too much for a small signal stack */
     if (!g) g = calloc(1, sizeof(*g));
-    if (!g) { ((guest_handler)h)(gsig, info, uctx); return; }
+    if (!g) { ((guest_handler)h)(gsig, info, uctx); return true; }
     _STRUCT_ARM_THREAD_STATE64 *ss = &uc->uc_mcontext->__ss;
     memset(g, 0, offsetof(guest_ucontext, uc_mcontext) + offsetof(guest_sigcontext, reserved));
     g->uc_stack.ss_sp = uc->uc_stack.ss_sp; g->uc_stack.ss_size = uc->uc_stack.ss_size; g->uc_stack.ss_flags = uc->uc_stack.ss_flags;
@@ -1429,6 +1429,68 @@ static void host_signal_entry(int dsig, siginfo_t *info, void *uctx)
     arm_thread_state64_set_pc_fptr(*ss, (void *)(uintptr_t)mine->uc_mcontext.pc);
     if (g) free(g);
     g = mine;
+    return true;
+}
+
+static void host_signal_entry(int dsig, siginfo_t *info, void *uctx)
+{
+    int gsig = tl_signal_from_darwin(dsig);
+    sig_trace("delivered", gsig);
+    deliver_to_guest(gsig, info, uctx);
+}
+
+/* ------------------------------------------------------------ fault signals the guest asked for */
+
+/* Android hands SIGILL, SIGFPE and SIGSEGV to the app's own handler, and libraries build CPU-feature probes on that:
+ * BoringSSL's OPENSSL_cpuid_setup runs
+ *
+ *     if (sigsetjmp(env, 1) == 0) { sha512su0 v0.2d, v0.2d; features |= ARMV8_SHA512; }
+ *
+ * behind a SIGILL handler that siglongjmps back, so a CPU without the instruction simply leaves the bit unset. Keeping
+ * those signals from the guest turns the probe into a real crash: this Unreal build died inside libUE4.so's constructors
+ * on sha512su0 -- an ARMv8.2 SHA-512 instruction the A10X does not implement -- with the probe's own handler recorded and
+ * never run ("guest installed a handler for fault signal 4: recorded, not installed").
+ *
+ * The guest's handler goes in front of whatever was there -- Husk's crash reporter, or the default action -- and the chain
+ * runs whenever the guest's handler cannot take the fault, so a genuine crash is still reported. SIGTRAP and SIGBUS stay
+ * with the JIT guard: it steps over its own traps and a guest handler in that path would break it. */
+static struct sigaction g_prev_fault[NSIG];
+static bool g_fault_hooked[NSIG];
+
+static void fault_signal_entry(int dsig, siginfo_t *info, void *uctx)
+{
+    int gsig = tl_signal_from_darwin(dsig);
+    sig_trace("fault to guest", gsig);
+    /* A handler that longjmps back (the probe's does) never returns here; one that adjusts the pc and returns is copied
+     * back by deliver_to_guest, which is what resumes the guest past the instruction. */
+    if (deliver_to_guest(gsig, info, uctx)) return;
+    struct sigaction *p = &g_prev_fault[dsig];
+    if ((p->sa_flags & SA_SIGINFO) && p->sa_sigaction) { p->sa_sigaction(dsig, info, uctx); return; }
+    if (p->sa_handler == SIG_IGN) return;
+    if (p->sa_handler && p->sa_handler != SIG_DFL) { p->sa_handler(dsig); return; }
+    /* Nobody wants it: take our handler off and let the fault happen again, so it is reported as what it is. */
+    sigaction(dsig, p, NULL);
+    pthread_kill(pthread_self(), dsig);
+}
+
+static void hook_fault_signal(int d, bool on)
+{
+    if (d <= 0 || d >= NSIG) return;
+    if (on) {
+        if (g_fault_hooked[d]) return;
+        struct sigaction sa, old;
+        memset(&sa, 0, sizeof sa); memset(&old, 0, sizeof old);
+        sa.sa_sigaction = fault_signal_entry;
+        /* NODEFER: the probe leaves through siglongjmp, never through our sigreturn, so the signal must not stay blocked
+         * for the thread afterwards -- a real SIGILL later has to be reported, not swallowed. */
+        sa.sa_flags = SA_SIGINFO | SA_NODEFER;
+        sigemptyset(&sa.sa_mask);
+        if (sigaction(d, &sa, &old) == 0) { g_prev_fault[d] = old; g_fault_hooked[d] = true; }
+        return;
+    }
+    if (!g_fault_hooked[d]) return;
+    sigaction(d, &g_prev_fault[d], NULL);
+    g_fault_hooked[d] = false;
 }
 
 static int is_fault_signal(int g) { return g == 4 || g == 5 || g == 6 || g == 7 || g == 8 || g == 11; }
@@ -1446,11 +1508,18 @@ static int b_sigaction(int sig, const guest_sigaction *act, guest_sigaction *old
     if (!act) return 0;
     g_guest_sig[sig].handler = act->handler;
     g_guest_sig[sig].flags = act->sa_flags;
-    /* Synchronous fault signals stay with the host: the app's own crash handling and the
-     * JIT guard depend on them, and a crash reporter replacing them would turn every
-     * guest fault into silence. */
+    /* Synchronous faults: the guest may have one, and libraries that probe the CPU depend on getting it (see
+     * fault_signal_entry). SIGTRAP and SIGBUS are the JIT guard's and stay recorded-only. */
     if (is_fault_signal(sig)) {
-        char note[96]; snprintf(note, sizeof(note), "guest installed a handler for fault signal %d: recorded, not installed", sig);
+        bool real = act->handler && act->handler != (void *)1;
+        bool jit = sig == 5 || sig == 7;
+        if (!jit) hook_fault_signal(d, real);
+        char note[160];
+        if (real && !jit)
+            snprintf(note, sizeof(note), "guest handler for fault signal %d: installed in front of the crash reporter "
+                                        "(CPU-feature probes rely on it)", sig);
+        else
+            snprintf(note, sizeof(note), "guest installed a handler for fault signal %d: recorded, not installed", sig);
         tl_note_once(note);
         return 0;
     }
