@@ -1508,14 +1508,18 @@ static int b_sigaction(int sig, const guest_sigaction *act, guest_sigaction *old
     if (!act) return 0;
     g_guest_sig[sig].handler = act->handler;
     g_guest_sig[sig].flags = act->sa_flags;
-    /* Synchronous faults: the guest may have one, and libraries that probe the CPU depend on getting it (see
-     * fault_signal_entry). SIGTRAP and SIGBUS are the JIT guard's and stay recorded-only. */
+    /* Synchronous faults stay with the host, with two exceptions: SIGILL and SIGFPE, which is what
+     * libraries run CPU-feature probes behind (see fault_signal_entry). SIGSEGV and SIGABRT are the
+     * runtime's own machinery -- IL2CPP's collector suspends threads on SIGSEGV, and a guest handler
+     * given those turns into a collector that spins on a thread it thinks it stopped: Unity ran at
+     * 100% CPU for as long as it was left, with its frame count frozen. SIGTRAP and SIGBUS are the
+     * JIT guard's. */
     if (is_fault_signal(sig)) {
         bool real = act->handler && act->handler != (void *)1;
-        bool jit = sig == 5 || sig == 7;
-        if (!jit) hook_fault_signal(d, real);
+        bool probe = sig == 4 || sig == 8;
+        if (probe) hook_fault_signal(d, real);
         char note[160];
-        if (real && !jit)
+        if (real && probe)
             snprintf(note, sizeof(note), "guest handler for fault signal %d: installed in front of the crash reporter "
                                         "(CPU-feature probes rely on it)", sig);
         else
