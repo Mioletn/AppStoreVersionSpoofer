@@ -1433,6 +1433,7 @@ NAT(G_pathLength)
 static struct {
     pthread_mutex_t lock;
     uint8_t *px; int w, h;          /* the latest frame the view system drew */
+    int stride;                     /* its bytes per row, for a host that copies rows */
     atomic_bool fresh;
     atomic_bool any;
 } S = { .lock = PTHREAD_MUTEX_INITIALIZER };
@@ -1457,6 +1458,7 @@ NAT(G_present)
     }
     pthread_mutex_lock(&S.lock);
     if (S.w != b->w || S.h != b->h) { free(S.px); S.px = malloc(b->stride * (size_t)b->h); S.w = b->w; S.h = b->h; }
+    S.stride = (int)b->stride;
     memcpy(S.px, b->px, b->stride * (size_t)b->h);
     pthread_mutex_unlock(&S.lock);
     atomic_store(&S.any, true);
@@ -1465,11 +1467,11 @@ NAT(G_present)
 }
 
 /* For the GL thread: when there is a new frame, its pixels (locked until tl_ui_frame_done). */
-bool tl_ui_frame_take(const uint8_t **px, int *w, int *h, bool *any)
+bool tl_ui_frame_take(const uint8_t **px, int *w, int *h, int *stride, bool *any)
 {
     if (!atomic_exchange(&S.fresh, false)) return false;
     pthread_mutex_lock(&S.lock);
-    *px = S.px; *w = S.w; *h = S.h; *any = atomic_load(&S.any);
+    *px = S.px; *w = S.w; *h = S.h; *stride = S.stride; *any = atomic_load(&S.any);
     return true;
 }
 void tl_ui_frame_done(void) { pthread_mutex_unlock(&S.lock); }

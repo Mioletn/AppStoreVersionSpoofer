@@ -122,6 +122,11 @@ final class TLUnityUIView: UIView, UIKeyInput {
         } else if engine == .java {
             TLUnityUIView.cocosView = self
             TLUnityUIView.installJavaHandlers()
+            // iOS 12.2: ANGLE's Metal backend cannot link a shader there, so the
+            // app's frame goes up as a CALayer's contents instead (see
+            // presentJavaFrame). Installed for java only: every other engine
+            // draws with its own GL and has nothing to hand over.
+            installJavaLayer()
             // Android's back gesture: a swipe in from the left edge.
             let back = UIScreenEdgePanGestureRecognizer(target: self, action: #selector(edgeSwiped(_:)))
             back.edges = .left
@@ -219,6 +224,7 @@ final class TLUnityUIView: UIView, UIKeyInput {
     override func layoutSubviews() {
         super.layoutSubviews()
         stats.frame = CGRect(x: bounds.width - 148, y: bounds.height - 22, width: 142, height: 16)
+        javaLayer?.frame = bounds
         if let webHost, webHost.frame != frame { webHost.frame = frame }
         guard bounds.width > 0, bounds.height > 0 else { return }
         let w = Int((bounds.width * contentScaleFactor).rounded())
@@ -264,6 +270,50 @@ final class TLUnityUIView: UIView, UIKeyInput {
             if isFirstResponder { resignFirstResponder() }
         }
         setNeedsLayout()
+    }
+
+    // MARK: - a Java app's frame, through UIKit (iOS 12.2)
+
+    /// See JavaFramePump: ANGLE cannot link a shader on iOS 12.2, so a Java
+    /// app's bitmap goes up as this layer's contents instead. Nothing else is
+    /// on screen for a Java app -- no GLSurfaceView means no GL content under
+    /// it -- so covering the metal layer is the whole job.
+    private var javaLayer: CALayer?
+    private var javaLayerLogged = false
+
+    private func installJavaLayer() {
+        let l = CALayer()
+        l.contentsGravity = .resize
+        l.contentsScale = contentScaleFactor
+        l.isHidden = true
+        layer.addSublayer(l)
+        javaLayer = l
+        huskJavaFramePump.present = { [weak self] data, w, h in
+            self?.showJavaFrame(data, w, h)
+        }
+    }
+
+    private func showJavaFrame(_ data: Data, _ w: Int, _ h: Int) {
+        guard let l = javaLayer else { return }
+        // Android's ARGB_8888 is R,G,B,A in memory, which is what
+        // premultipliedLast with the default byte order means here.
+        guard let provider = CGDataProvider(data: data as CFData),
+              let image = CGImage(width: w, height: h, bitsPerComponent: 8, bitsPerPixel: 32,
+                                  bytesPerRow: w * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+                                  provider: provider, decode: nil, shouldInterpolate: false,
+                                  intent: .defaultIntent)
+        else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        l.frame = bounds
+        l.contents = image
+        l.isHidden = false
+        CATransaction.commit()
+        if !javaLayerLogged {
+            javaLayerLogged = true
+            HuskLog.log("javaapp", "presenting through UIKit (\(w)x\(h)): ANGLE cannot link a shader here")
+        }
     }
 
     private func launch(width: Int, height: Int) {
@@ -1135,4 +1185,54 @@ extension TLApp {
         case .auto: return drawsPortraitByManifest()
         }
     }
+}
+
+// MARK: - the bridge the C render thread calls
+
+/// Holds a Java app's frame between the runtime's render thread and UIKit.
+///
+/// Deliberately outside the view: `husk_ui_present_bitmap` is a plain C
+/// function called on that thread, and a UIView (and everything reachable from
+/// it) is main-actor isolated -- reaching the view from there would be an
+/// isolation violation for the sake of a memcpy.
+final class JavaFramePump {
+    private let lock = NSLock()
+    private var buffer = Data()
+    private var busy = false
+    /// Runs on the main thread with (pixels, width, height).
+    var present: ((Data, Int, Int) -> Void)?
+
+    func push(_ src: UnsafePointer<UInt8>, _ w: Int, _ h: Int, _ stride: Int) {
+        lock.lock()
+        if busy { lock.unlock(); return }
+        busy = true
+        lock.unlock()
+
+        let row = w * 4
+        let need = row * h
+        if buffer.count != need { buffer = Data(count: need) }
+        buffer.withUnsafeMutableBytes { raw in
+            guard let base = raw.baseAddress else { return }
+            for y in 0..<h {
+                memcpy(base.advanced(by: y * row), src.advanced(by: y * stride), row)
+            }
+        }
+        let snapshot = buffer
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.present?(snapshot, w, h)
+            self.lock.lock(); self.busy = false; self.lock.unlock()
+        }
+    }
+}
+
+/// One native runtime per process, so one pump.
+let huskJavaFramePump = JavaFramePump()
+
+/// `husk_ui_present_bitmap(px, w, h, stride)`, for the C render loop (see
+/// husk-tl-dvm-android.c). Called on the runtime's render thread.
+@_cdecl("husk_ui_present_bitmap")
+public func husk_ui_present_bitmap(_ px: UnsafePointer<UInt8>?, _ w: Int32, _ h: Int32, _ stride: Int32) {
+    guard let px, w > 0, h > 0, stride >= w * 4 else { return }
+    huskJavaFramePump.push(px, Int(w), Int(h), Int(stride))
 }

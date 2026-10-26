@@ -559,9 +559,20 @@ static void log_pending(const char *where)
 
 /* ---- the view system's frame, drawn over whatever the app's GL drew (its own context, so the app's GL state is never touched) */
 
-bool tl_ui_frame_take(const uint8_t **px, int *w, int *h, bool *any);
+bool tl_ui_frame_take(const uint8_t **px, int *w, int *h, int *stride, bool *any);
 void tl_ui_frame_done(void);
 bool tl_ui_has_frame(void);
+
+/* The host's own presentation path, implemented in TLUnityUIView.swift.
+ *
+ * iOS 12.2 needs it: ANGLE's Metal backend emits MSL containing
+ * [[barycentric_coord]], which Metal 2.0 does not know, and ANGLE reads the
+ * resulting warning as a link failure ("Internal error while linking shader"),
+ * so every program it builds is unusable and every frame through it is the
+ * clear colour. A Java app's frame is a plain RGBA bitmap, so UIKit can put it
+ * on screen without ANGLE at all -- and with no GLSurfaceView there is nothing
+ * else the layer would be showing. */
+extern void husk_ui_present_bitmap(const uint8_t *px, int w, int h, int stride);
 
 typedef struct {
     uint32_t prog, tex, vbo;
@@ -1092,12 +1103,15 @@ static void *gl_main(void *arg)
                 p1[0] = L(gl10);
             }
         }
-        const uint8_t *px; int fw, fh; bool any;
-        bool fresh = tl_ui_frame_take(&px, &fw, &fh, &any);
+        const uint8_t *px; int fw, fh, fs; bool any;
+        bool fresh = tl_ui_frame_take(&px, &fw, &fh, &fs, &any);
         if (fresh) {
             makeCurrent(dpy, surf, surf, ui);
             if (any) ov_upload(&ov, px, fw, fh);
             else ov.tw = ov.th = 0;
+            /* See husk_ui_present_bitmap above: no GLSurfaceView means the whole
+               screen is the view system's bitmap, so UIKit can carry it. */
+            if (any && !A.gl_renderer) husk_ui_present_bitmap(px, fw, fh, fs);
             tl_ui_frame_done();
         }
         if (app) {
