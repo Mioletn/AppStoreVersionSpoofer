@@ -579,6 +579,12 @@ typedef struct {
     int tw, th;
 } overlay;
 
+/* Set when ANGLE could not give us a usable program, which is the only case the
+   host's UIKit fallback exists for. On a device where the shader links, the
+   overlay draws normally and the fallback stays off -- an opaque layer over a
+   live one can only show an older frame. */
+static bool ov_link_failed;
+
 static uint32_t ov_shader(uint32_t kind, const char *src)
 {
     uint32_t (*create)(uint32_t) = gl_fn("glCreateShader");
@@ -635,6 +641,7 @@ static void ov_init_flip(overlay *o, bool bottom_up)
                 char why[256] = "";
                 if (getlog) getlog(o->prog, (int32_t)sizeof why - 1, NULL, why);
                 tl_log_line("ov: program FAILED to link: %s", why);
+                ov_link_failed = true;
             }
         }
     }
@@ -1115,7 +1122,7 @@ static void *gl_main(void *arg)
                its own: an engine's own surface (SDL, Unity) and a GLSurfaceView
                both put the picture in the drawable, and an opaque layer over it
                would hide the game instead of showing its UI. */
-            if (any && !A.gl_renderer && !app_frame_on()) {
+            if (any && ov_link_failed && !A.gl_renderer && !app_frame_on()) {
                 husk_ui_present_bitmap(px, fw, fh, fs);
                 uikit_shown = true;
             }
