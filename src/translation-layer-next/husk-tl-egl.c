@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include "husk-tl-bionic.h"
 #include "husk-tl-ld.h"
@@ -593,9 +594,17 @@ static void w_glCompileShader(unsigned sh)
     if (slen > 0) getsrc(sh, slen, &got, src);
     for (char *q = log; *q; q++) if (*q == '\n') *q = '|';
     tl_log_line("gl: shader %u failed to compile (%d bytes of source): %.380s", sh, slen, log);
+    /* Where the failing source goes: the directory the log asks for, else the app's own temporary
+     * directory -- which is writable from inside the sandbox and reachable over SSH, so a shader that
+     * ANGLE rejects can be read back without setting anything up first. */
     const char *dir = getenv("TL_GL_SHADER_DUMP");
+    char tmpdir[600];
+    if (!dir) {
+        const char *t = getenv("TMPDIR");
+        if (t && *t) { snprintf(tmpdir, sizeof(tmpdir), "%s/husk-shaders", t); mkdir(tmpdir, 0777); dir = tmpdir; }
+    }
     if (dir) {
-        char path[600]; snprintf(path, sizeof(path), "%s/shader-%d.txt", dir, n);
+        char path[700]; snprintf(path, sizeof(path), "%s/shader-%d.txt", dir, n);
         FILE *f = fopen(path, "w");
         if (f) { fprintf(f, "%s\n---- source ----\n%s\n", log, src); fclose(f); }
     }

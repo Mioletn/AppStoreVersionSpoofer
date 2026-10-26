@@ -132,6 +132,51 @@ static char *oes_external_rewrite(const char *src)
     return out;
 }
 
+/* Unreal's runtime-built shaders say "#version 300 es" and put layout(location) on a vertex output,
+ * which 3.00 has no room for -- ANGLE answers "invalid layout qualifier: only valid on program inputs
+ * and outputs" and the engine quits -- and 3.10 does. The rest of such a game's shaders (3716 of them
+ * in this one's pak) are already "#version 310 es", and so is the driver: ANGLE reports OpenGL ES 3.1.
+ * The shim above is the opposite direction, for when the driver is only 3.0. This returns the 310 text
+ * for exactly that shape -- a location qualifier in front of the one place 3.00 forbids it -- and NULL
+ * for everything else, so a 3.00 shader that is happy as it is stays that way. */
+static char *es31_upgrade_or_null(const char *src, size_t n, int type)
+{
+    const char *ver = strstr(src, "#version 300 es");
+    if (!ver) return NULL;
+    /* Which side of the linker is illegal in 3.00: a vertex shader's outputs and a fragment
+     * shader's inputs. The other two (vertex inputs, fragment outputs) are where 3.00 puts
+     * layout(location), so those alone are no reason to change anything. */
+    const char *want = type == 0x8B30 /* GL_FRAGMENT_SHADER */ ? "in" : "out";
+    size_t wl = strlen(want);
+    bool located_out = false;
+    for (size_t i = 0; i + 7 <= n && !located_out;)
+    {
+        if (!strncmp(src + i, "layout(", 7) && (i == 0 || !es31_ident(src[i - 1])))
+        {
+            size_t q0 = i + 7, j = q0; int depth = 1;
+            while (j < n && depth) { if (src[j] == '(') depth++; else if (src[j] == ')') depth--; j++; }
+            bool has_location = false;
+            for (size_t t = q0; t + 8 <= j; t++) if (!strncmp(src + t, "location", 8)) { has_location = true; break; }
+            size_t k = j;
+            while (k < n && (src[k] == ' ' || src[k] == '\t' || src[k] == '\n' || src[k] == '\r')) k++;
+            if (has_location && k + wl <= n && !strncmp(src + k, want, wl) &&
+                (k + wl == n || !es31_ident(src[k + wl]))) located_out = true;
+            i = j;
+            continue;
+        }
+        i++;
+    }
+    if (!located_out) return NULL;
+    size_t off = (size_t)(ver - src);
+    char *out = malloc(n + 8);
+    if (!out) return NULL;
+    memcpy(out, src, off);
+    memcpy(out + off, "#version 310 es", 15);            /* same length as the 300 line */
+    memcpy(out + off + 15, src + off + 15, n - off - 15);
+    out[n] = 0;
+    return out;
+}
+
 static void (*r_glShaderSource)(unsigned, int, const char *const *, const int *);
 static void w_glShaderSource(unsigned sh, int count, const char *const *str, const int *len)
 {
@@ -144,9 +189,22 @@ static void w_glShaderSource(unsigned sh, int count, const char *const *str, con
     char *ext = oes_external_rewrite(cat);
     if (ext) { free(cat); cat = ext; k = strlen(cat); }
     if (!g_es31_shim) {
-        const char *one = cat; int one_len = (int)k;
+        /* The shader's type is settled at glCreateShader, before its source, and it decides which
+         * side of the interface 3.00 forbids a location on: the vertex shader's outputs, or the
+         * fragment shader's inputs. */
+        void (*getiv)(unsigned, unsigned, int *) = a_eglGetProcAddress ? a_eglGetProcAddress("glGetShaderiv") : NULL;
+        int type = 0;
+        if (getiv) getiv(sh, 0x8B4F /* GL_SHADER_TYPE */, &type);
+        char *up = (type == 0x8B31 /* GL_VERTEX_SHADER */ || type == 0x8B30 /* GL_FRAGMENT_SHADER */)
+                       ? es31_upgrade_or_null(cat, k, type) : NULL;
+        if (up) {
+            static atomic_int said;
+            if (!atomic_exchange(&said, 1))
+                tl_log_line("gl: an ES 3.0 shader with layout(location) on an output, said 310 es (the driver is 3.1)");
+        }
+        const char *one = up ? up : cat; int one_len = up ? (int)strlen(up) : (int)k;
         r_glShaderSource(sh, 1, &one, &one_len);
-        free(cat);
+        free(up); free(cat);
         return;
     }
     es31_bind rec[ES31_BINDS]; int nrec = 0;

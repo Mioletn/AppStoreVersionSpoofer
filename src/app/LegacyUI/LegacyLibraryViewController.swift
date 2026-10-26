@@ -82,6 +82,8 @@ final class LegacyLibraryViewController: UIViewController {
     /// moves, so without a record of what has been taken the same APK would be
     /// imported again on every appearance.
     private var adoptingDropped = false
+    /// Dropped files that failed this run, so a bad one is not retried on every appearance.
+    private var refusedThisRun = Set<String>()
     private func adoptDroppedAPKs() {
         guard !adoptingDropped else { return }
         guard let docs = FileManager.default.urls(for: .documentDirectory,
@@ -93,21 +95,35 @@ final class LegacyLibraryViewController: UIViewController {
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
 
         let key = "husk.legacy.adoptedPackages"
-        var adopted = Set(UserDefaults.standard.stringArray(forKey: key) ?? [])
-        guard let next = dropped.first(where: { !adopted.contains($0.lastPathComponent) })
-        else { return }
+        let adopted = Set(UserDefaults.standard.stringArray(forKey: key) ?? [])
+        guard let next = dropped.first(where: {
+            !adopted.contains($0.lastPathComponent) && !refusedThisRun.contains($0.lastPathComponent)
+        }) else { return }
 
         adoptingDropped = true
-        adopted.insert(next.lastPathComponent)
-        UserDefaults.standard.set(Array(adopted), forKey: key)
         HuskLog.log("ui", "legacy: importing \(next.lastPathComponent) from the Husk folder")
 
-        store.importAPKs([next]) { [weak self] _ in
+        store.importAPKs([next]) { [weak self] outcome in
             guard let self else { return }
             self.adoptingDropped = false
-            self.refresh()
-            HuskLog.log("ui", "legacy: import done, \(self.store.apps.count) app(s) in the library")
-            self.adoptDroppedAPKs()          // the next one, if several were dropped
+            switch outcome {
+            case .added:
+                // Recorded only once the copy is done. A big APK can take a while, and a run that
+                // ends halfway through it (the app is killed, or the copy fails) used to leave the
+                // file recorded as imported with no app to show for it, so it was never tried again.
+                var done = Set(UserDefaults.standard.stringArray(forKey: key) ?? [])
+                done.insert(next.lastPathComponent)
+                UserDefaults.standard.set(Array(done), forKey: key)
+                self.refresh()
+                HuskLog.log("ui", "legacy: import done, \(self.store.apps.count) app(s) in the library")
+                self.adoptDroppedAPKs()          // the next one, if several were dropped
+            case .refused(let reason):
+                // Not recorded, but not retried either: the same file would fail the same way on
+                // every appearance of this screen.
+                self.refusedThisRun.insert(next.lastPathComponent)
+                HuskLog.log("ui", "legacy: \(next.lastPathComponent) was not imported: \(reason)")
+                self.adoptDroppedAPKs()
+            }
         }
     }
 
