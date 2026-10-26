@@ -496,7 +496,57 @@ static void w_glColorMask(unsigned r, unsigned g, unsigned b, unsigned a) { r_gl
 static void (*r_glDepthMask)(unsigned);
 static void w_glDepthMask(unsigned f) { r_glDepthMask(f & 0xff); }
 static void (*r_glVertexAttribPointer)(unsigned, int, unsigned, unsigned, int, const void *);
-static void w_glVertexAttribPointer(unsigned i, int s, unsigned t, unsigned n, int st, const void *p) { r_glVertexAttribPointer(i, s, t, n & 0xff, st, p); }
+static void w_glVertexAttribPointer(unsigned i, int s, unsigned t, unsigned n, int st, const void *p)
+{
+    /* A NULL pointer with no buffer bound leaves ANGLE streaming from address zero at draw time, which is
+     * what killed Unreal inside rx::StreamVertexData. Say what the state was when it was declared. */
+    if (!p && a_eglGetProcAddress) {
+        static atomic_int said;
+        if (atomic_fetch_add(&said, 1) < 8) {
+            void (*getiv)(unsigned, int *) = a_eglGetProcAddress("glGetIntegerv");
+            int bound = -1;
+            if (getiv) getiv(0x8894 /* GL_ARRAY_BUFFER_BINDING */, &bound);
+            tl_log_line("gl: glVertexAttribPointer(%u, %d comps, stride %d, pointer NULL) with ARRAY_BUFFER %d", i, s, st, bound);
+        }
+    }
+    r_glVertexAttribPointer(i, s, t, n & 0xff, st, p);
+}
+/* ES 3.1's vertex-binding API. ANGLE's Metal backend is a 3.0 renderer, so these calls reach a context
+ * that does not implement them; a log of the first few says which path an engine took, which is the
+ * difference between "it used the 3.1 API and needs it emulated" and "it never called it". */
+#define HUSK_LOG_31(fnname, fmt, ...) \
+    do { static atomic_int n; if (atomic_fetch_add(&n, 1) < 24) tl_log_line("gl: " fnname fmt, __VA_ARGS__); } while (0)
+static void (*r_glBindVertexBuffer)(unsigned, unsigned, long, int);
+static void w_glBindVertexBuffer(unsigned b, unsigned buf, long off, int stride)
+{
+    HUSK_LOG_31("glBindVertexBuffer", "(binding %u, buffer %u, offset %ld, stride %d)", b, buf, off, stride);
+    if (r_glBindVertexBuffer) r_glBindVertexBuffer(b, buf, off, stride);
+}
+static void (*r_glVertexAttribFormat)(unsigned, int, unsigned, unsigned char, unsigned);
+static void w_glVertexAttribFormat(unsigned a, int size, unsigned type, unsigned char norm, unsigned rel)
+{
+    HUSK_LOG_31("glVertexAttribFormat", "(attrib %u, %d, %#x, norm %u, offset %u)", a, size, type, norm, rel);
+    if (r_glVertexAttribFormat) r_glVertexAttribFormat(a, size, type, norm, rel);
+}
+static void (*r_glVertexAttribIFormat)(unsigned, int, unsigned, unsigned);
+static void w_glVertexAttribIFormat(unsigned a, int size, unsigned type, unsigned rel)
+{
+    HUSK_LOG_31("glVertexAttribIFormat", "(attrib %u, %d, %#x, offset %u)", a, size, type, rel);
+    if (r_glVertexAttribIFormat) r_glVertexAttribIFormat(a, size, type, rel);
+}
+static void (*r_glVertexAttribBinding)(unsigned, unsigned);
+static void w_glVertexAttribBinding(unsigned a, unsigned b)
+{
+    HUSK_LOG_31("glVertexAttribBinding", "(attrib %u, binding %u)", a, b);
+    if (r_glVertexAttribBinding) r_glVertexAttribBinding(a, b);
+}
+static void (*r_glVertexBindingDivisor)(unsigned, unsigned);
+static void w_glVertexBindingDivisor(unsigned b, unsigned d)
+{
+    HUSK_LOG_31("glVertexBindingDivisor", "(binding %u, divisor %u)", b, d);
+    if (r_glVertexBindingDivisor) r_glVertexBindingDivisor(b, d);
+}
+
 static void (*r_glUniformMatrix2fv)(int, int, unsigned, const float *);
 static void w_glUniformMatrix2fv(int l, int c, unsigned t, const float *v) { r_glUniformMatrix2fv(l, c, t & 0xff, v); }
 static void (*r_glUniformMatrix3fv)(int, int, unsigned, const float *);
@@ -638,7 +688,7 @@ static EGLBoolean w_eglDestroySync(EGLDisplay d, void *s) { return s ? r_eglDest
 static const struct { const char *name; void *wrap; void **real; } k_adapt[] = {
     ADAPT(glBlitFramebuffer), ADAPT(glTexSubImage3D), ADAPT(glCompressedTexSubImage3D), ADAPT(glCopyImageSubData),
     ADAPT(glColorMask), ADAPT(glDepthMask), ADAPT(glVertexAttribPointer), ADAPT(glUniformMatrix2fv),
-    ADAPT(glUniformMatrix3fv), ADAPT(glUniformMatrix4fv), ADAPT(glSampleCoverage), ADAPT(glGetString), ADAPT(glGetStringi), ADAPT(glCompileShader), ADAPT(glShaderSource), ADAPT(glAttachShader), ADAPT(glLinkProgram), ADAPT(glGetIntegerv), ADAPT(glBindBufferBase), ADAPT(glBindBuffer), ADAPT(glBufferData), ADAPT(glBufferSubData), ADAPT(glBindBufferRange),
+    ADAPT(glUniformMatrix3fv), ADAPT(glUniformMatrix4fv), ADAPT(glSampleCoverage), ADAPT(glBindVertexBuffer), ADAPT(glVertexAttribFormat), ADAPT(glVertexAttribIFormat), ADAPT(glVertexAttribBinding), ADAPT(glVertexBindingDivisor), ADAPT(glGetString), ADAPT(glGetStringi), ADAPT(glCompileShader), ADAPT(glShaderSource), ADAPT(glAttachShader), ADAPT(glLinkProgram), ADAPT(glGetIntegerv), ADAPT(glBindBufferBase), ADAPT(glBindBuffer), ADAPT(glBufferData), ADAPT(glBufferSubData), ADAPT(glBindBufferRange),
     ADAPT(eglClientWaitSyncKHR), ADAPT(eglDestroySyncKHR), ADAPT(eglGetSyncAttribKHR), ADAPT(eglClientWaitSync), ADAPT(eglDestroySync),
 };
 
