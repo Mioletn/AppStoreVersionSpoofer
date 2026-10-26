@@ -1163,6 +1163,15 @@ extern void tl_loop_install(void);
 extern void tl_input_install(void);
 extern void tl_tls_install(void);
 extern void tl_gms_install(void);
+/* Just the tables, none of the engine state: the Java-app path (bin.mt.plus) runs its own framework through the
+ * interpreter, so the engine globals (H.*) below would be a second, empty copy of what the app already has. The
+ * tables still matter there: MT Manager's libmtprotect asks android/os/ServiceManager.getService from JNI_OnLoad
+ * and only registers its natives when the answer is not null. */
+void tl_jni_hle_tables_install(void)
+{
+    for (size_t i = 0; i < sizeof(k_classes) / sizeof(k_classes[0]); i++) tl_jni_declare(k_classes[i].name, k_classes[i].super);
+    tl_jni_register_hle(k_hle);
+}
 void tl_jni_hle_install(void)
 {
     for (size_t i = 0; i < sizeof(k_classes) / sizeof(k_classes[0]); i++) tl_jni_declare(k_classes[i].name, k_classes[i].super);

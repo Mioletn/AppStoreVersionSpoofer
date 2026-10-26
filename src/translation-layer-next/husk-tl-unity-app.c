@@ -282,6 +282,7 @@ static void *java_boot(void *arg)
     snprintf(v, sizeof(v), "%s", A.data); setenv("ANDROID_ROOT", v, 1);
     snprintf(v, sizeof(v), "%s", A.data); setenv("ANDROID_DATA", v, 1);
     tl_jni_init();
+    { extern void tl_jni_hle_tables_install(void); tl_jni_hle_tables_install(); }
     if (!tl_dvm_start(boot, nb)) { tl_log_line("java: the runtime did not start"); *ok = false; return NULL; }
     snprintf(v, sizeof(v), "%s/com.android.i18n/lib64", r); tl_ld_add_search_dir(v);
     snprintf(v, sizeof(v), "%s/com.android.conscrypt/lib64", r); tl_ld_add_search_dir(v);
