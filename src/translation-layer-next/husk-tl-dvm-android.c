@@ -1207,9 +1207,35 @@ static bool pool_str(const uint8_t *pool, size_t sz, uint32_t idx, char *out, si
         size_t len = *p; if (*p & 0x80) { len = ((size_t)(p[0] & 0x7f) << 8) | p[1]; p += 2; } else p++;
         snprintf(out, n, "%.*s", (int)len, (const char *)p);
     } else {
+        /* UTF-16. Non-ASCII characters used to become '?', which lost every name an obfuscator spelled
+         * outside ASCII: MT Manager's Application class is "l.<tai-tham><arabic><tai-tham>", and with
+         * each of those three characters turned into a question mark Class.forName looked for "l.???",
+         * found nothing, and Husk fell back to a plain Application -- the one that loads libmtprotect,
+         * registers its natives and sets the app up, so the first native call died with
+         * UnsatisfiedLinkError. Encode the code units as UTF-8 (as u16_to_utf8 does in the DVM), which
+         * is also what dex_str hands the class index, so the names match. */
         size_t len = rd16le(p); p += 2;
         size_t k = 0;
-        for (size_t i = 0; i < len && k + 1 < n; i++) { uint16_t c = rd16le(p + 2 * i); out[k++] = c < 0x80 ? (char)c : '?'; }
+        for (size_t i = 0; i < len && k + 5 < n; i++) {
+            uint32_t c = rd16le(p + 2 * i);
+            if (c >= 0xD800 && c < 0xDC00 && i + 1 < len) {          /* a surrogate pair is one character */
+                uint32_t lo = rd16le(p + 2 * (i + 1));
+                if (lo >= 0xDC00 && lo < 0xE000) { c = 0x10000u + ((c - 0xD800u) << 10) + (lo - 0xDC00u); i++; }
+            }
+            if (c == 0) { out[k++] = (char)0xC0; out[k++] = (char)0x80; }     /* Java's modified UTF-8: a C string must not end there */
+            else if (c < 0x80) out[k++] = (char)c;
+            else if (c < 0x800) { out[k++] = (char)(0xC0 | (c >> 6)); out[k++] = (char)(0x80 | (c & 0x3F)); }
+            else if (c < 0x10000) {
+                out[k++] = (char)(0xE0 | (c >> 12));
+                out[k++] = (char)(0x80 | ((c >> 6) & 0x3F));
+                out[k++] = (char)(0x80 | (c & 0x3F));
+            } else {
+                out[k++] = (char)(0xF0 | (c >> 18));
+                out[k++] = (char)(0x80 | ((c >> 12) & 0x3F));
+                out[k++] = (char)(0x80 | ((c >> 6) & 0x3F));
+                out[k++] = (char)(0x80 | (c & 0x3F));
+            }
+        }
         out[k] = 0;
     }
     return true;

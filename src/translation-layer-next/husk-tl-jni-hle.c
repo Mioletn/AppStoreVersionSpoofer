@@ -179,6 +179,19 @@ static void Context_getSystemService(tl_jcall *c)
     c->ret = vl(NULL);
 }
 
+/* android/os/ServiceManager.getService(name): the binder a system service is reached through. Apps and
+ * packers call it from native code (through JNI) before the app is up -- MT Manager's libmtprotect asks
+ * for one in JNI_OnLoad and only then registers its natives -- so a null here can stand between a
+ * library and every method it implements. The real handle is a Binder; this one is enough for code
+ * that checks the service is there and calls Java-side methods on the returned object. */
+static void ServiceManager_getService(tl_jcall *c)
+{
+    const char *n = S(c->args[0].l);
+    char note[160]; snprintf(note, sizeof(note), "ServiceManager.getService(\"%s\")", n ? n : "?");
+    tl_note_once(note);
+    c->ret = vl(make("android/os/Binder"));
+}
+
 /* --------------------------------------------------------------- Activity */
 
 static void Activity_getWindow(tl_jcall *c) { c->ret = vl(H.window); }
@@ -997,6 +1010,8 @@ static const tl_jhle k_hle[] = {
     M("android/content/Context", "checkCallingOrSelfPermission", "(Ljava/lang/String;)I", Context_checkCallingOrSelfPermission),
     M("android/content/Context", "checkSelfPermission", "(Ljava/lang/String;)I", Context_checkSelfPermission),
     M("android/content/Context", "getSystemService", "(Ljava/lang/String;)Ljava/lang/Object;", Context_getSystemService),
+    M("android/os/ServiceManager", "getService", "(Ljava/lang/String;)Landroid/os/IBinder;", ServiceManager_getService),
+    M("android/os/ServiceManager", "checkService", "(Ljava/lang/String;)Landroid/os/IBinder;", ServiceManager_getService),
     M("android/content/Context", "getContentResolver", "()Landroid/content/ContentResolver;", Context_getContentResolver),
     M("android/app/Activity", "getWindow", "()Landroid/view/Window;", Activity_getWindow),
     M("android/app/Activity", "getWindowManager", "()Landroid/view/WindowManager;", Activity_getWindowManager),
