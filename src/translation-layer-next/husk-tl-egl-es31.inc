@@ -35,7 +35,7 @@ static const char *es31_fix(const char *s, bool glsl)
 static bool es31_ident(int c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'; }
 
 /* The 300 es text of a 310 es shader (malloc'd), with the bindings it dropped in rec[0..*nrec). Anything else is returned as it came. */
-static char *es31_downgrade(const char *src, size_t n, es31_bind *rec, int *nrec)
+static char *es31_downgrade(const char *src, size_t n, es31_bind *rec, int *nrec, int type)
 {
     char *out = malloc(n + 4096); size_t o = 0;
     *nrec = 0;
@@ -53,6 +53,30 @@ static char *es31_downgrade(const char *src, size_t n, es31_bind *rec, int *nrec
             size_t d = j; while (d < n && src[d] != ';' && src[d] != '{') d++;
             char decl[200]; size_t dl = d - j; if (dl >= sizeof(decl)) dl = sizeof(decl) - 1;
             memcpy(decl, src + j, dl); decl[dl] = 0;
+            /* A varying's location, which 3.00 has no qualifier for. The two stages name their side
+             * differently -- Unreal's vertex shader writes var_TEXCOORD10 and its fragment shader reads
+             * in_TEXCOORD10 -- and 3.00 pairs varyings by name, not by the location the 3.1 shader was
+             * written with. So the location becomes a name both sides derive the same way: out vec4
+             * var_TEXCOORD10 in one shader and in vec4 in_TEXCOORD10 in the other both become husk_v10.
+             * A #define in front of the declaration does the renaming, so nothing in the body is touched. */
+            if (!b && d < n && src[d] == ';') {
+                char *loc = strstr(q, "location");
+                const char *dir = type == 0x8B30 /* GL_FRAGMENT_SHADER */ ? " in " : " out ";
+                if (loc && strstr(decl, dir) && !strstr(decl, "gl_")) {
+                    int val = -1;
+                    char *eq2 = strchr(loc, '=');
+                    if (eq2) val = atoi(eq2 + 1);
+                    size_t e = dl;
+                    while (e && (decl[e - 1] == ' ' || decl[e - 1] == '\t' || decl[e - 1] == '\n' || decl[e - 1] == '\r')) e--;
+                    while (e && decl[e - 1] == ']') { while (e && decl[e - 1] != '[') e--; if (e) e--; }
+                    size_t st = e; while (st && es31_ident(decl[st - 1])) st--;
+                    if (val >= 0 && e > st && e - st < 64) {
+                        o += (size_t)sprintf(out + o, "#define %.*s husk_v%d\n", (int)(e - st), decl + st, val);
+                        i = j;                                  /* the declaration follows, without its layout */
+                        continue;
+                    }
+                }
+            }
             bool opaque = strstr(decl, "image") || strstr(decl, "atomic_uint");
             bool ssbo = !opaque && strstr(decl, "buffer") && d < n && src[d] == '{' && !strstr(decl, "writeonly") && !strstr(decl, "coherent");
             if (ssbo && b) {
@@ -208,7 +232,10 @@ static void w_glShaderSource(unsigned sh, int count, const char *const *str, con
         return;
     }
     es31_bind rec[ES31_BINDS]; int nrec = 0;
-    char *down = es31_downgrade(cat, k, rec, &nrec);
+    void (*getiv2)(unsigned, unsigned, int *) = a_eglGetProcAddress ? a_eglGetProcAddress("glGetShaderiv") : NULL;
+    int stage = 0;
+    if (getiv2) getiv2(sh, 0x8B4F /* GL_SHADER_TYPE */, &stage);
+    char *down = es31_downgrade(cat, k, rec, &nrec, stage);
     pthread_mutex_lock(&g_es31_mu);
     int slot = (int)(sh % ES31_SHADERS);
     g_es31_sh[slot].shader = sh; g_es31_sh[slot].n = nrec; memcpy(g_es31_sh[slot].b, rec, sizeof(es31_bind) * (size_t)nrec);
