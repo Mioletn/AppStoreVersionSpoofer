@@ -313,6 +313,70 @@ MSL_WARNING_PATCH = (
 """,
 )
 
+
+# MTLPixelFormatDepth16Unorm arrived with iOS 13. On 12.2 Metal does not know
+# the value (250) and -validateMTLPixelFormat: asserts at texture creation, from
+# inside the draw call, which aborts the process:
+#
+#   validateMTLPixelFormat:174: failed assertion `pixelFormat (250) is not a
+#   valid MTLPixelFormat.'
+#   rx::mtl::Texture::Make2DTexture <- gl::Texture::setStorage <- texStorage2D
+#
+# That is Unity's first frame: it allocates a 16-bit depth texture for the main
+# framebuffer and dies before the splash. Metal has no query for "is this pixel
+# format valid" (the assertion is the only answer), so the version is asked
+# instead: 12.2 takes the 32-bit float depth path ANGLE already uses for GPUs
+# without D16, which is a superset of it and supported everywhere.
+DEPTH16_OLD_A = """        case angle::FormatID::D16_UNORM:
+
+            if (display->supportsAppleGPUFamily(1))
+            {
+                this->metalFormat    = MTLPixelFormatDepth16Unorm;
+                this->actualFormatId = angle::FormatID::D16_UNORM;
+            }
+            else
+            {
+                this->metalFormat    = MTLPixelFormatDepth32Float;
+                this->actualFormatId = angle::FormatID::D32_FLOAT;
+            }
+            break;"""
+
+DEPTH16_NEW_A = """        case angle::FormatID::D16_UNORM:
+
+            // husk: ios12 -- Depth16Unorm is iOS 13; on 12.2 creating one asserts and aborts.
+            if ((@available(iOS 13.0, *)) && display->supportsAppleGPUFamily(1))
+            {
+                this->metalFormat    = MTLPixelFormatDepth16Unorm;
+                this->actualFormatId = angle::FormatID::D16_UNORM;
+            }
+            else
+            {
+                this->metalFormat    = MTLPixelFormatDepth32Float;
+                this->actualFormatId = angle::FormatID::D32_FLOAT;
+            }
+            break;"""
+
+DEPTH16_OLD_B = """        case angle::FormatID::D16_UNORM:
+
+            this->metalFormat    = MTLPixelFormatDepth16Unorm;
+            this->actualFormatId = angle::FormatID::D16_UNORM;
+            break;"""
+
+DEPTH16_NEW_B = """        case angle::FormatID::D16_UNORM:
+
+            // husk: ios12 -- see the same case above: Depth16Unorm is iOS 13 only.
+            if (@available(iOS 13.0, *))
+            {
+                this->metalFormat    = MTLPixelFormatDepth16Unorm;
+                this->actualFormatId = angle::FormatID::D16_UNORM;
+            }
+            else
+            {
+                this->metalFormat    = MTLPixelFormatDepth32Float;
+                this->actualFormatId = angle::FormatID::D32_FLOAT;
+            }
+            break;"""
+
 FILES = [
     ("mtl_utils.mm", "#include <TargetConditionals.h>\n",
      [(MTL_UTILS_OLD, MTL_UTILS_NEW), SHADER_LIBRARY_PATCH, MSL_WARNING_PATCH]),
@@ -348,11 +412,30 @@ def patch(directory, name, anchor, replacements):
     print("    %s patched (%d probes)" % (name, len(replacements)))
 
 
+def patch_depth16(directory):
+    """The format table has two places that name the Metal format for GL's D16_UNORM."""
+    path = os.path.join(directory, "src/libANGLE/renderer/metal/mtl_format_table_autogen.mm")
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+    if MARK in text:
+        print("    mtl_format_table_autogen.mm already patched")
+        return
+    for old, new in ((DEPTH16_OLD_A, DEPTH16_NEW_A), (DEPTH16_OLD_B, DEPTH16_NEW_B)):
+        if text.count(old) != 1:
+            raise SystemExit("patch_angle_ios12: mtl_format_table_autogen.mm holds %d copies of a "
+                             "D16 case this expects once://n%s" % (text.count(old), old))
+        text = text.replace(old, new)
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+    print("    mtl_format_table_autogen.mm patched (D16_UNORM)")
+
+
 def main():
     if len(sys.argv) != 2:
         raise SystemExit("usage: patch_angle_ios12.py <ANGLE source tree>")
     for name, anchor, replacements in FILES:
         patch(sys.argv[1], name, anchor, replacements)
+    patch_depth16(sys.argv[1])
 
 
 if __name__ == "__main__":
