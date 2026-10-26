@@ -698,6 +698,9 @@ static void va_apply(va_state *st, int attrib)
     if (f->binding < 0 || !f->size) return;
     if (f->binding >= VA_BINDINGS) return;
     va_bind_t *b = &st->bind[f->binding];
+    static atomic_int traced;
+    if (atomic_fetch_add(&traced, 1) < 16)
+        tl_log_line("gl: attrib %d <- binding %d (buffer %u, offset %ld, stride %d, relative %u)", attrib, f->binding, b->buf, b->off, b->stride, f->rel);
     if (!b->buf) return;
     int prev = 0;
     if (r_glGetIntegerv) r_glGetIntegerv(0x8894 /* GL_ARRAY_BUFFER_BINDING */, &prev);
@@ -711,13 +714,27 @@ static void va_apply(va_state *st, int attrib)
     r_glBindBuffer(0x8892, (unsigned)prev);
 }
 
-static void w_glBindVertexArray(unsigned vao)
+/* Which vertex array the 3.1 declarations belong to. Both spellings are followed: ANGLE advertises
+ * GL_OES_vertex_array_object, and an engine that checks for it binds with the OES entry point -- Unreal does --
+ * so tracking only the core one left every declaration in the default array's slot while the draw used another,
+ * which is the client-side attribute and the memcpy(NULL) again. */
+static void va_track(unsigned vao)
 {
-    if (r_glBindVertexArray) r_glBindVertexArray(vao);
     pthread_mutex_lock(&g_va_mu);
     g_va_current = vao;
     va_slot(vao, true);
     pthread_mutex_unlock(&g_va_mu);
+}
+static void w_glBindVertexArray(unsigned vao)
+{
+    if (r_glBindVertexArray) r_glBindVertexArray(vao);
+    va_track(vao);
+}
+static void (*r_glBindVertexArrayOES)(unsigned);
+static void w_glBindVertexArrayOES(unsigned vao)
+{
+    if (r_glBindVertexArrayOES) r_glBindVertexArrayOES(vao);
+    va_track(vao);
 }
 
 static void (*r_glBindVertexBuffer)(unsigned, unsigned, long, int);
@@ -785,7 +802,7 @@ static void w_glVertexBindingDivisor(unsigned b, unsigned d)
 static const struct { const char *name; void *wrap; void **real; } k_adapt[] = {
     ADAPT(glBlitFramebuffer), ADAPT(glTexSubImage3D), ADAPT(glCompressedTexSubImage3D), ADAPT(glCopyImageSubData),
     ADAPT(glColorMask), ADAPT(glDepthMask), ADAPT(glVertexAttribPointer), ADAPT(glUniformMatrix2fv),
-    ADAPT(glUniformMatrix3fv), ADAPT(glUniformMatrix4fv), ADAPT(glSampleCoverage), ADAPT(glBindVertexBuffer), ADAPT(glVertexAttribIPointer), ADAPT(glVertexAttribDivisor), ADAPT(glBindVertexArray), ADAPT(glVertexAttribFormat), ADAPT(glVertexAttribIFormat), ADAPT(glVertexAttribBinding), ADAPT(glVertexBindingDivisor), ADAPT(glGetString), ADAPT(glGetStringi), ADAPT(glCompileShader), ADAPT(glShaderSource), ADAPT(glAttachShader), ADAPT(glLinkProgram), ADAPT(glGetIntegerv), ADAPT(glBindBufferBase), ADAPT(glBindBuffer), ADAPT(glBufferData), ADAPT(glBufferSubData), ADAPT(glBindBufferRange),
+    ADAPT(glUniformMatrix3fv), ADAPT(glUniformMatrix4fv), ADAPT(glSampleCoverage), ADAPT(glBindVertexBuffer), ADAPT(glVertexAttribIPointer), ADAPT(glVertexAttribDivisor), ADAPT(glBindVertexArray), ADAPT(glBindVertexArrayOES), ADAPT(glVertexAttribFormat), ADAPT(glVertexAttribIFormat), ADAPT(glVertexAttribBinding), ADAPT(glVertexBindingDivisor), ADAPT(glGetString), ADAPT(glGetStringi), ADAPT(glCompileShader), ADAPT(glShaderSource), ADAPT(glAttachShader), ADAPT(glLinkProgram), ADAPT(glGetIntegerv), ADAPT(glBindBufferBase), ADAPT(glBindBuffer), ADAPT(glBufferData), ADAPT(glBufferSubData), ADAPT(glBindBufferRange),
     ADAPT(eglClientWaitSyncKHR), ADAPT(eglDestroySyncKHR), ADAPT(eglGetSyncAttribKHR), ADAPT(eglClientWaitSync), ADAPT(eglDestroySync),
 };
 
