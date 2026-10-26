@@ -81,10 +81,17 @@ final class LegacyGameViewController: UIViewController {
         for (i, w) in windows.enumerated() {
             let root = w.rootViewController.map { String(describing: type(of: $0)) } ?? "nil"
             let ours = (w === view.window) ? " <-- this screen" : ""
-            HuskLog.log("ui", "  #\(i) \(NSStringFromCGRect(w.frame)) level \(w.windowLevel) "
+            HuskLog.log("ui", "  #\(i) \(Self.rect(w.frame)) level \(w.windowLevel) "
                       + "hidden \(w.isHidden) key \(w.isKeyWindow) root \(root)\(ours)")
         }
-        HuskLog.log("ui", "  our view \(NSStringFromCGRect(view.frame)), window \(view.window != nil ? "yes" : "NO")")
+        HuskLog.log("ui", "  our view \(Self.rect(view.frame)), window \(view.window != nil ? "yes" : "NO")")
+    }
+
+    /// A CGRect as "x,y wxh", in a form every SDK accepts: NSStringFromCGRect is
+    /// an error now ("has been replaced by NSCoder.string(for:)") and the
+    /// replacement is newer than this target's floor on some SDKs.
+    private static func rect(_ r: CGRect) -> String {
+        "(\(Int(r.origin.x)),\(Int(r.origin.y))) \(Int(r.width))x\(Int(r.height))"
     }
 
     override func viewDidLoad() {
