@@ -678,7 +678,11 @@ static va_state *va_slot(unsigned vao, bool create)
     for (int i = 0; i < VA_ARRAYS; i++) if (!g_va[i].used) {
         memset(&g_va[i], 0, sizeof g_va[i]);
         g_va[i].used = true; g_va[i].vao = vao;
-        for (int a = 0; a < VA_ATTRIBS; a++) g_va[i].fmt[a].binding = -1;
+        /* ES 3.1: a generic attribute's vertex binding is initially the attribute's own index, so
+         * glVertexAttribFormat alone still pairs with glBindVertexBuffer(<that index>, ...). Setting
+         * this to -1 (as it was) left every attribute unmatched -- the draw then streamed from a
+         * client-side pointer of NULL, which is the memcpy(0) Unreal died on. */
+        for (int a = 0; a < VA_ATTRIBS; a++) g_va[i].fmt[a].binding = a;
         return &g_va[i];
     }
     return NULL;
@@ -758,6 +762,7 @@ static void w_glVertexAttribFormat(unsigned a, int size, unsigned type, unsigned
     pthread_mutex_lock(&g_va_mu);
     va_state *st = va_slot(g_va_current, true);
     if (st && a < VA_ATTRIBS) {
+        if (st->fmt[a].binding < 0) st->fmt[a].binding = (int)a;
         st->fmt[a].size = size; st->fmt[a].type = type; st->fmt[a].norm = norm; st->fmt[a].rel = rel; st->fmt[a].isInt = 0;
         va_apply(st, (int)a);
     }
@@ -770,6 +775,7 @@ static void w_glVertexAttribIFormat(unsigned a, int size, unsigned type, unsigne
     pthread_mutex_lock(&g_va_mu);
     va_state *st = va_slot(g_va_current, true);
     if (st && a < VA_ATTRIBS) {
+        if (st->fmt[a].binding < 0) st->fmt[a].binding = (int)a;
         st->fmt[a].size = size; st->fmt[a].type = type; st->fmt[a].norm = 0; st->fmt[a].rel = rel; st->fmt[a].isInt = 1;
         va_apply(st, (int)a);
     }
