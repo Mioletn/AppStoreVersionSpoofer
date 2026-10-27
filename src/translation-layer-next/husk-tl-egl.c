@@ -697,7 +697,15 @@ static void (*r_glBindVertexArray)(unsigned);
 /* One attribute, as the bound vertex array would have been told by glVertexAttribPointer. */
 static void va_apply(va_state *st, int attrib)
 {
-    if (!st || attrib < 0 || attrib >= VA_ATTRIBS || !r_glVertexAttribPointer || !r_glBindBuffer) return;
+    if (!st || attrib < 0 || attrib >= VA_ATTRIBS) return;
+    /* Lazily resolve the ES 3.0 entry points the translation needs.  An engine that uses only ES 3.1
+     * (glVertexAttribFormat + glBindVertexBuffer) never calls eglGetProcAddress for these, so the
+     * pointers stay NULL and every va_apply silently did nothing. */
+    if (!r_glVertexAttribPointer && a_eglGetProcAddress) r_glVertexAttribPointer = (void *)a_eglGetProcAddress("glVertexAttribPointer");
+    if (!r_glBindBuffer && a_eglGetProcAddress) r_glBindBuffer = (void *)a_eglGetProcAddress("glBindBuffer");
+    if (!r_glVertexAttribIPointer && a_eglGetProcAddress) r_glVertexAttribIPointer = (void *)a_eglGetProcAddress("glVertexAttribIPointer");
+    if (!r_glVertexAttribDivisor && a_eglGetProcAddress) r_glVertexAttribDivisor = (void *)a_eglGetProcAddress("glVertexAttribDivisor");
+    if (!r_glVertexAttribPointer || !r_glBindBuffer) return;
     va_fmt_t *f = &st->fmt[attrib];
     if (f->binding < 0 || !f->size) return;
     if (f->binding >= VA_BINDINGS) return;
@@ -786,6 +794,7 @@ static void w_glVertexAttribIFormat(unsigned a, int size, unsigned type, unsigne
 static void (*r_glVertexAttribBinding)(unsigned, unsigned);
 static void w_glVertexAttribBinding(unsigned a, unsigned b)
 {
+    { static atomic_int said; if (atomic_fetch_add(&said, 1) < 16) tl_log_line("gl: glVertexAttribBinding(%u, %u) vao %u", a, b, g_va_current); }
     pthread_mutex_lock(&g_va_mu);
     va_state *st = va_slot(g_va_current, true);
     if (st && a < VA_ATTRIBS && b < VA_BINDINGS) { st->fmt[a].binding = (int)b; va_apply(st, (int)a); }
