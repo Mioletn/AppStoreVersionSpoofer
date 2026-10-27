@@ -283,14 +283,15 @@ static void *java_boot(void *arg)
     snprintf(v, sizeof(v), "%s", A.data); setenv("ANDROID_DATA", v, 1);
     tl_jni_init();
     {
-        /* The engine starters run tl_hle_configure + tl_jni_hle_install; a plain Java app needs the same so its
-         * native libraries (MT Manager's packer walks getService -> asInterface -> getApplicationInfo from
-         * JNI_OnLoad) meet a framework that answers. The interpreter's own framework classes still win whenever
-         * both exist -- lookup_method asks the dvm first. */
+        /* A plain Java app needs the framework tables so its native libraries (MT Manager's packer walks
+         * getService -> asInterface -> getApplicationInfo from JNI_OnLoad) meet a framework that answers. The
+         * full install is too much here: its input/http/gms tables declare classes the interpreter wants to
+         * attach itself, and System.<clinit> then dies in Unsafe.objectFieldOffset. The tables and the
+         * configure -- which fills in where the APK and the data are -- are what the packer path needs. */
         extern void tl_hle_configure(const char *pkg, const char *apk, const char *data, int w, int h);
         tl_hle_configure(A.package, A.apk, A.data, A.width, A.height);
-        extern void tl_jni_hle_install(void);
-        tl_jni_hle_install();
+        extern void tl_jni_hle_tables_install(void);
+        tl_jni_hle_tables_install();
     }
     if (!tl_dvm_start(boot, nb)) { tl_log_line("java: the runtime did not start"); *ok = false; return NULL; }
     snprintf(v, sizeof(v), "%s/com.android.i18n/lib64", r); tl_ld_add_search_dir(v);
