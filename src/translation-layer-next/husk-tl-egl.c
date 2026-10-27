@@ -804,10 +804,45 @@ static void w_glVertexBindingDivisor(unsigned b, unsigned d)
     pthread_mutex_unlock(&g_va_mu);
 }
 
+/* A draw, described from the driver's side: which attributes are on, which buffer (if any) each reads, and the
+ * pointer the driver would dereference when the buffer is 0. An engine whose vertices are all in VBOs should never
+ * show buffer 0 here; if one does, the pointer says how far off the translation was. */
+static void (*r_glDrawElements)(unsigned, int, unsigned, const void *);
+static void draw_state_note(const char *what, int count, unsigned type)
+{
+    static atomic_int said;
+    if (atomic_fetch_add(&said, 1) >= 3) return;
+    typedef void (*giv_fn)(unsigned, unsigned, int *);
+    typedef void (*gpv_fn)(unsigned, unsigned, void **);
+    static giv_fn giv; static gpv_fn gpv;
+    if (!giv && a_eglGetProcAddress) giv = (giv_fn)a_eglGetProcAddress("glGetVertexAttribiv");
+    if (!gpv && a_eglGetProcAddress) gpv = (gpv_fn)a_eglGetProcAddress("glGetVertexAttribPointerv");
+    if (!giv) return;
+    tl_log_line("gl: %s count %d type %#x vao %u", what, count, type, g_va_current);
+    for (unsigned a = 0; a < 8; a++) {
+        int en = 0, buf = 0, size = 0, stride = 0, ty = 0;
+        giv(a, 0x8622 /* ENABLED */, &en);
+        if (!en) continue;
+        giv(a, 0x889F /* ARRAY_BUFFER_BINDING */, &buf);
+        giv(a, 0x8623 /* SIZE */, &size);
+        giv(a, 0x8624 /* STRIDE */, &stride);
+        giv(a, 0x8625 /* TYPE */, &ty);
+        void *p = NULL;
+        if (gpv) gpv(a, 0x8645 /* ARRAY_POINTER */, &p);
+        tl_log_line("gl:   attrib %u on: size %d type %#x stride %d buffer %d pointer %p", a, size, ty, stride, buf, p);
+    }
+}
+static void w_glDrawElements(unsigned mode, int count, unsigned type, const void *indices)
+{
+    draw_state_note("drawElements", count, type);
+    if (r_glDrawElements) r_glDrawElements(mode, count, type, indices);
+}
+
 #define ADAPT(name) { #name, (void *)w_##name, (void **)&r_##name }
 static const struct { const char *name; void *wrap; void **real; } k_adapt[] = {
     ADAPT(glBlitFramebuffer), ADAPT(glTexSubImage3D), ADAPT(glCompressedTexSubImage3D), ADAPT(glCopyImageSubData),
     ADAPT(glColorMask), ADAPT(glDepthMask), ADAPT(glVertexAttribPointer), ADAPT(glUniformMatrix2fv),
+    ADAPT(glDrawElements),
     ADAPT(glUniformMatrix3fv), ADAPT(glUniformMatrix4fv), ADAPT(glSampleCoverage), ADAPT(glBindVertexBuffer), ADAPT(glVertexAttribIPointer), ADAPT(glVertexAttribDivisor), ADAPT(glBindVertexArray), ADAPT(glBindVertexArrayOES), ADAPT(glVertexAttribFormat), ADAPT(glVertexAttribIFormat), ADAPT(glVertexAttribBinding), ADAPT(glVertexBindingDivisor), ADAPT(glGetString), ADAPT(glGetStringi), ADAPT(glCompileShader), ADAPT(glShaderSource), ADAPT(glAttachShader), ADAPT(glLinkProgram), ADAPT(glGetIntegerv), ADAPT(glBindBufferBase), ADAPT(glBindBuffer), ADAPT(glBufferData), ADAPT(glBufferSubData), ADAPT(glBindBufferRange),
     ADAPT(eglClientWaitSyncKHR), ADAPT(eglDestroySyncKHR), ADAPT(eglGetSyncAttribKHR), ADAPT(eglClientWaitSync), ADAPT(eglDestroySync),
 };
