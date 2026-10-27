@@ -759,6 +759,7 @@ static void w_glBindVertexBuffer(unsigned b, unsigned buf, long off, int stride)
 static void (*r_glVertexAttribFormat)(unsigned, int, unsigned, unsigned char, unsigned);
 static void w_glVertexAttribFormat(unsigned a, int size, unsigned type, unsigned char norm, unsigned rel)
 {
+    { static atomic_int said; if (atomic_fetch_add(&said, 1) < 16) tl_log_line("gl: glVertexAttribFormat(%u, %d, %#x, norm %u, rel %u) vao %u", a, size, type, norm, rel, g_va_current); }
     pthread_mutex_lock(&g_va_mu);
     va_state *st = va_slot(g_va_current, true);
     if (st && a < VA_ATTRIBS) {
@@ -808,6 +809,18 @@ static void w_glVertexBindingDivisor(unsigned b, unsigned d)
  * pointer the driver would dereference when the buffer is 0. An engine whose vertices are all in VBOs should never
  * show buffer 0 here; if one does, the pointer says how far off the translation was. */
 static void (*r_glDrawElements)(unsigned, int, unsigned, const void *);
+
+/* Apply every attribute in the current VAO before a draw.  The ES 3.1 translation may have been called in any
+ * order (bind before format, format before bind, VAO switch in between) -- this forces the final state into ANGLE
+ * so no attribute is left client-side with a stale pointer. */
+static void va_apply_all(void)
+{
+    pthread_mutex_lock(&g_va_mu);
+    va_state *st = va_slot(g_va_current, false);
+    if (st) for (int a = 0; a < VA_ATTRIBS; a++) va_apply(st, a);
+    pthread_mutex_unlock(&g_va_mu);
+}
+
 static void draw_state_note(const char *what, int count, unsigned type)
 {
     static atomic_int said;
@@ -834,15 +847,23 @@ static void draw_state_note(const char *what, int count, unsigned type)
 }
 static void w_glDrawElements(unsigned mode, int count, unsigned type, const void *indices)
 {
+    va_apply_all();
     draw_state_note("drawElements", count, type);
     if (r_glDrawElements) r_glDrawElements(mode, count, type, indices);
+}
+static void (*r_glDrawArrays)(unsigned, int, int);
+static void w_glDrawArrays(unsigned mode, int first, int count)
+{
+    va_apply_all();
+    draw_state_note("drawArrays", count, 0);
+    if (r_glDrawArrays) r_glDrawArrays(mode, first, count);
 }
 
 #define ADAPT(name) { #name, (void *)w_##name, (void **)&r_##name }
 static const struct { const char *name; void *wrap; void **real; } k_adapt[] = {
     ADAPT(glBlitFramebuffer), ADAPT(glTexSubImage3D), ADAPT(glCompressedTexSubImage3D), ADAPT(glCopyImageSubData),
     ADAPT(glColorMask), ADAPT(glDepthMask), ADAPT(glVertexAttribPointer), ADAPT(glUniformMatrix2fv),
-    ADAPT(glDrawElements),
+    ADAPT(glDrawElements), ADAPT(glDrawArrays),
     ADAPT(glUniformMatrix3fv), ADAPT(glUniformMatrix4fv), ADAPT(glSampleCoverage), ADAPT(glBindVertexBuffer), ADAPT(glVertexAttribIPointer), ADAPT(glVertexAttribDivisor), ADAPT(glBindVertexArray), ADAPT(glBindVertexArrayOES), ADAPT(glVertexAttribFormat), ADAPT(glVertexAttribIFormat), ADAPT(glVertexAttribBinding), ADAPT(glVertexBindingDivisor), ADAPT(glGetString), ADAPT(glGetStringi), ADAPT(glCompileShader), ADAPT(glShaderSource), ADAPT(glAttachShader), ADAPT(glLinkProgram), ADAPT(glGetIntegerv), ADAPT(glBindBufferBase), ADAPT(glBindBuffer), ADAPT(glBufferData), ADAPT(glBufferSubData), ADAPT(glBindBufferRange),
     ADAPT(eglClientWaitSyncKHR), ADAPT(eglDestroySyncKHR), ADAPT(eglGetSyncAttribKHR), ADAPT(eglClientWaitSync), ADAPT(eglDestroySync),
 };

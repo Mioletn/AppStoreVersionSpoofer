@@ -1168,6 +1168,14 @@ static bool call_native(dvm_method *m, jobj *self, const jvalue *params, jvalue 
     void *fn = find_jni(m);
     if (!fn) {
         tl_log_line("dvm: no native for %s.%s%s", m->cls->name, m->name, m->sig);
+        /* A packer's integrity-check <clinit> with no implementation: the real classes are already in the
+         * DEX (MT Manager ships 32k+ classes unpacked), so skipping the check is safe and lets the app
+         * continue.  Other missing natives still throw as before. */
+        if (!strcmp(m->name, "<clinit>")) {
+            tl_log_line("dvm: skipping unresolvable <clinit> for %s (packer integrity check?)", m->cls->name);
+            ret->j = 0;
+            return true;
+        }
         return dvm_throw("java/lang/UnsatisfiedLinkError", "No implementation found for %s.%s%s", m->cls->name, m->name, m->sig);
     }
     if (g_dvm_trace >= 2) tl_log_line("dvm: jni %s.%s%s", m->cls->name, m->name, m->sig);
