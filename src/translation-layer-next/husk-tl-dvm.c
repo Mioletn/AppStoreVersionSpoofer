@@ -1485,6 +1485,8 @@ static bool invoke_regs(dvm_method *caller, int kind, uint32_t midx, int count, 
     }
     if (!target) {
         if (r->hm) { *result = tl_jni_invoke(self, r->hm, kind == 2 || kind == 1, params); return !tl_jni_pending(); }
+        tl_log_line("dvm: NoSuchMethodError %s.%s%s (kind %d, self %p) from %s.%s", r->cls->name, r->name, r->sig, kind, (void *)self,
+                    caller ? caller->cls->name : "?", caller ? caller->name : "?");
         return dvm_throw("java/lang/NoSuchMethodError", "%s.%s%s", r->cls->name, r->name, r->sig);
     }
     if (g_dvm_trace >= 2) tl_log_line("dvm: -> %s.%s%s", target->cls->name, target->name, target->sig);
