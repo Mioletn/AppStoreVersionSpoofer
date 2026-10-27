@@ -192,14 +192,39 @@ static void ServiceManager_getService(tl_jcall *c)
     c->ret = vl(make("android/os/Binder"));
 }
 
-/* The step after getService for native packers: Binder.asInterface on the "package" service. MT Manager's
- * libmtprotect walks the whole chain from JNI_OnLoad (getService -> IPackageManager$Stub.asInterface) and only
- * registers its natives at the end, so each link has to answer. What it does with the proxy afterwards shows up
- * in the log as UNIMPLEMENTED calls on it; those get their own HLE as they appear. */
+/* The step after getService for native packers: Binder.asInterface on the "package" service, then calls on the
+ * proxy itself. MT Manager's libmtprotect walks the whole chain from JNI_OnLoad (getService -> asInterface ->
+ * getApplicationInfo) and only registers its natives at the end, so each link has to answer. What it asks next
+ * shows up in the log as UNIMPLEMENTED calls and gets its own entry from there, rather than guessed all at once. */
 static void IPackageManager_asInterface(tl_jcall *c)
 {
     tl_note_once("IPackageManager$Stub.asInterface -> a Proxy");
     c->ret = vl(make("android/content/pm/IPackageManager$Stub$Proxy"));
+}
+static void IPMProxy_getApplicationInfo(tl_jcall *c)
+{
+    const char *pkg = S(c->args[0].l);
+    tl_note_once("IPackageManager$Stub$Proxy.getApplicationInfo -> a made ApplicationInfo");
+    /* made at call time: the interpreter has attached the framework class by now, so the field slots are the dvm's
+     * (an object made at install time would keep the pre-attach slots and read back empty) */
+    jobj *ai = make("android/content/pm/ApplicationInfo");
+    set_str(ai, "packageName", pkg && pkg[0] ? pkg : H.pkg);
+    set_str(ai, "sourceDir", H.apk);
+    set_str(ai, "publicSourceDir", H.apk);
+    set_str(ai, "nativeLibraryDir", H.native_lib);
+    set_str(ai, "dataDir", H.data);
+    c->ret = vl(ai);
+}
+static void IPMProxy_getPackagesForUid(tl_jcall *c)
+{
+    jobj *a = tl_jni_new_obj_array(C("java/lang/String"), 1);
+    a->oarr.v[0] = STR(H.pkg[0] ? H.pkg : "bin.mt.plus");
+    c->ret = vl(a);
+}
+static void IPMProxy_getNameForUid(tl_jcall *c)
+{
+    (void)c;
+    c->ret = vl(STR(H.pkg[0] ? H.pkg : "bin.mt.plus"));
 }
 
 /* --------------------------------------------------------------- Activity */
@@ -1023,6 +1048,10 @@ static const tl_jhle k_hle[] = {
     M("android/os/ServiceManager", "getService", "(Ljava/lang/String;)Landroid/os/IBinder;", ServiceManager_getService),
     M("android/os/ServiceManager", "checkService", "(Ljava/lang/String;)Landroid/os/IBinder;", ServiceManager_getService),
     M("android/content/pm/IPackageManager$Stub", "asInterface", "(Landroid/os/IBinder;)Landroid/content/pm/IPackageManager;", IPackageManager_asInterface),
+    M("android/content/pm/IPackageManager$Stub$Proxy", "getApplicationInfo", "(Ljava/lang/String;II)Landroid/content/pm/ApplicationInfo;", IPMProxy_getApplicationInfo),
+    M("android/content/pm/IPackageManager$Stub$Proxy", "getApplicationInfo", "(Ljava/lang/String;I)Landroid/content/pm/ApplicationInfo;", IPMProxy_getApplicationInfo),
+    M("android/content/pm/IPackageManager$Stub$Proxy", "getPackagesForUid", "(I)[Ljava/lang/String;", IPMProxy_getPackagesForUid),
+    M("android/content/pm/IPackageManager$Stub$Proxy", "getNameForUid", "(I)Ljava/lang/String;", IPMProxy_getNameForUid),
     M("android/content/Context", "getContentResolver", "()Landroid/content/ContentResolver;", Context_getContentResolver),
     M("android/app/Activity", "getWindow", "()Landroid/view/Window;", Activity_getWindow),
     M("android/app/Activity", "getWindowManager", "()Landroid/view/WindowManager;", Activity_getWindowManager),
