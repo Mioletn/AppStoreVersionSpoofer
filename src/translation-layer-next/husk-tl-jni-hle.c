@@ -192,6 +192,16 @@ static void ServiceManager_getService(tl_jcall *c)
     c->ret = vl(make("android/os/Binder"));
 }
 
+/* The step after getService for native packers: Binder.asInterface on the "package" service. MT Manager's
+ * libmtprotect walks the whole chain from JNI_OnLoad (getService -> IPackageManager$Stub.asInterface) and only
+ * registers its natives at the end, so each link has to answer. What it does with the proxy afterwards shows up
+ * in the log as UNIMPLEMENTED calls on it; those get their own HLE as they appear. */
+static void IPackageManager_asInterface(tl_jcall *c)
+{
+    tl_note_once("IPackageManager$Stub.asInterface -> a Proxy");
+    c->ret = vl(make("android/content/pm/IPackageManager$Stub$Proxy"));
+}
+
 /* --------------------------------------------------------------- Activity */
 
 static void Activity_getWindow(tl_jcall *c) { c->ret = vl(H.window); }
@@ -1012,6 +1022,7 @@ static const tl_jhle k_hle[] = {
     M("android/content/Context", "getSystemService", "(Ljava/lang/String;)Ljava/lang/Object;", Context_getSystemService),
     M("android/os/ServiceManager", "getService", "(Ljava/lang/String;)Landroid/os/IBinder;", ServiceManager_getService),
     M("android/os/ServiceManager", "checkService", "(Ljava/lang/String;)Landroid/os/IBinder;", ServiceManager_getService),
+    M("android/content/pm/IPackageManager$Stub", "asInterface", "(Landroid/os/IBinder;)Landroid/content/pm/IPackageManager;", IPackageManager_asInterface),
     M("android/content/Context", "getContentResolver", "()Landroid/content/ContentResolver;", Context_getContentResolver),
     M("android/app/Activity", "getWindow", "()Landroid/view/Window;", Activity_getWindow),
     M("android/app/Activity", "getWindowManager", "()Landroid/view/WindowManager;", Activity_getWindowManager),
