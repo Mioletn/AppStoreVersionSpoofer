@@ -1166,7 +1166,10 @@ static bool call_native(dvm_method *m, jobj *self, const jvalue *params, jvalue 
 {
     if (m->intrinsic) return m->intrinsic(self, params, ret);
     void *fn = find_jni(m);
-    if (!fn) return dvm_throw("java/lang/UnsatisfiedLinkError", "No implementation found for %s.%s%s", m->cls->name, m->name, m->sig);
+    if (!fn) {
+        tl_log_line("dvm: no native for %s.%s%s", m->cls->name, m->name, m->sig);
+        return dvm_throw("java/lang/UnsatisfiedLinkError", "No implementation found for %s.%s%s", m->cls->name, m->name, m->sig);
+    }
     if (g_dvm_trace >= 2) tl_log_line("dvm: jni %s.%s%s", m->cls->name, m->name, m->sig);
     int64_t gp[8]; double fp[8]; int64_t stk[256];
     int ng = 0, nf = 0, ns = 0;

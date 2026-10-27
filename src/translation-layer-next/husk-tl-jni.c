@@ -1055,10 +1055,11 @@ typedef struct { const char *name, *sig; void *fn; } native_method;
 static int32_t jni_RegisterNatives(void *env, jo cls, const native_method *m, int32_t n)
 {
     (void)env;
-    if (!cls || cls->kind != TL_K_CLASS) return -1;
+    if (!cls || cls->kind != TL_K_CLASS) { tl_log_line("jni: RegisterNatives on no class (%p)", (void *)cls); return -1; }
     tl_jclass *given = cls->klass.jc;
     bool tl_dvm_declares(tl_jclass *jc, const char *name, const char *sig);
     pthread_mutex_lock(&g_lock);
+    tl_log_line("jni: RegisterNatives %s: %d method%s", given->name, n, n == 1 ? "" : "s");
     for (int32_t i = 0; i < n; i++) {
         /* the class that declares the method, the given one or a superclass (ART's FindClassMethod): Reanimated registers
            NativeProxyCommon's natives through its subclass NativeProxy */
