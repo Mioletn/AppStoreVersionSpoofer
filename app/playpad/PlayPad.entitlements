@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- 平台应用身份：读 /var/mobile/Documents 里的 IPA、调 installd 都需要 -->
+    <key>platform-application</key>
+    <true/>
+    <key>com.apple.private.security.no-sandbox</key>
+    <true/>
+    <key>com.apple.private.security.container-required</key>
+    <false/>
+    <key>com.apple.private.security.storage.AppDataContainers</key>
+    <true/>
+    <key>get-task-allow</key>
+    <true/>
+    <!-- MobileInstallation 的 SPI 白名单：装 / 卸 / 查 -->
+    <key>com.apple.private.mobileinstall.allowedSPI</key>
+    <array>
+        <string>Install</string>
+        <string>InstallProfile</string>
+        <string>Uninstall</string>
+        <string>Upgrade</string>
+        <string>Lookup</string>
+        <string>Browse</string>
+    </array>
+    <!-- 启动别的应用 -->
+    <key>com.apple.private.application-service.fake-bundle-identifiers</key>
+    <true/>
+</dict>
+</plist>

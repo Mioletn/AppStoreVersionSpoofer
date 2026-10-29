@@ -2,7 +2,7 @@ name: Build AppStoreVersionSpoofer
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, macpad-probe ]
   workflow_dispatch:
 
 jobs:
@@ -52,6 +52,40 @@ jobs:
           export THEOS="$THEOS"
           make clean
           make package FINALPACKAGE=1
+
+      - name: Package IPAs
+        # macpad-ipa-v4
+        run: |
+          set -e
+          rm -rf ipapkg && mkdir -p ipapkg
+          APPS=$(find . -maxdepth 5 -type d -name "*.app" -not -path "*/Payload/*" -not -path "./ipapkg/*" | sort)
+          echo "找到的 app bundle:"; echo "$APPS"
+          [ -n "$APPS" ] || { echo "没有任何 .app"; find . -name "*.app" -maxdepth 6; exit 1; }
+          for APP in $APPS; do
+            NAME=$(basename "$APP" .app)
+            echo; echo "=== 打包 $NAME ==="
+            rm -rf ipapkg/$NAME && mkdir -p ipapkg/$NAME/Payload
+            cp -R "$APP" "ipapkg/$NAME/Payload/$NAME.app"
+            if [ ! -f "ipapkg/$NAME/Payload/$NAME.app/Info.plist" ]; then
+              if [ -f "$NAME-Info.plist" ]; then
+                cp "$NAME-Info.plist" "ipapkg/$NAME/Payload/$NAME.app/Info.plist"
+                echo "已补 $NAME-Info.plist"
+              else
+                echo "警告：$NAME 缺 Info.plist"
+              fi
+            fi
+            ( cd "ipapkg/$NAME" && zip -qry "../$NAME.ipa" Payload )
+            ls -l "ipapkg/$NAME.ipa"
+            find "ipapkg/$NAME/Payload/$NAME.app" -maxdepth 1 -type f | sort | head -20
+          done
+          echo "--- packages/ 内容（deb 应在此）---"
+          ls -l packages || true
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MacPad-ipa
+          path: ipapkg/*.ipa
 
       - name: Upload .deb artifact
         uses: actions/upload-artifact@v4

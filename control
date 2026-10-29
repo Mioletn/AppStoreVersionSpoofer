@@ -1,8 +1,8 @@
-Package: com.custom.appstoreversionspoofer
-Name: AppStoreVersionSpoofer
-Version: 1.0-9
+Package: com.macpad.probe
+Name: MacPadProbe
+Version: 1.0
 Architecture: iphoneos-arm
-Maintainer: CustomDev
-Description: Spoof iOS version for AppStore server check and local app detection. Ships a standalone config app (no Settings integration). iOS12.2 compatible.
-Depends: mobilesubstrate
+Maintainer: macpad
+Description: macPad Stage-0 ABI probe (Substitute-injected, writes /var/mobile/macpad_report.txt)
 Section: Tweaks
+Depends: mobilesubstrate

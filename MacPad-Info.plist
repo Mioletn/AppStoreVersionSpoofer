@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>zh_CN</string>
+    <key>CFBundleDisplayName</key>
+    <string>macPad</string>
+    <key>CFBundleExecutable</key>
+    <string>MacPad</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.macpad.app</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>MacPad</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.4.0</string>
+    <key>CFBundleVersion</key>
+    <string>40</string>
+    <!-- SpringBoard 靠这几个字段判断"这个包能不能在本平台跑"，
+         缺了 CFBundleSupportedPlatforms 会直接拒绝启动（uiopen 返回 0 但进程不出现）。 -->
+    <key>CFBundleSupportedPlatforms</key>
+    <array>
+        <string>iPhoneOS</string>
+    </array>
+    <key>CFBundleSignature</key>
+    <string>????</string>
+    <key>DTPlatformName</key>
+    <string>iphoneos</string>
+    <key>DTPlatformVersion</key>
+    <string>12.4</string>
+    <key>DTSDKName</key>
+    <string>iphoneos12.4</string>
+    <key>DTSDKBuild</key>
+    <string>16G73</string>
+    <key>DTXcode</key>
+    <string>1040</string>
+    <key>DTXcodeBuild</key>
+    <string>12B5044c</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.developer-tools</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>12.2</string>
+    <key>LSRequiresIPhoneOS</key>
+    <true/>
+    <key>MinimumOSVersion</key>
+    <string>12.2</string>
+    <key>UIDeviceFamily</key>
+    <array>
+        <integer>1</integer>
+        <integer>2</integer>
+    </array>
+    <key>UIRequiredDeviceCapabilities</key>
+    <array>
+        <string>arm64</string>
+    </array>
+    <key>UISupportedInterfaceOrientations</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+    <key>UISupportedInterfaceOrientations~ipad</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationPortraitUpsideDown</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+    <key>UIStatusBarStyle</key>
+    <string>UIStatusBarStyleLightContent</string>
+    <key>UIViewControllerBasedStatusBarAppearance</key>
+    <true/>
+    <key>UIRequiresFullScreen</key>
+    <false/>
+    <!-- 这台设备上的 uiopen 只认 URL，不认 -b <bundleid>（打印 usage: uiopen <url>）。
+         所以给 App 注册一个 scheme，用 `uiopen macpad://` 才能把它拉起来。 -->
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>com.macpad.app</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>macpad</string>
+            </array>
+        </dict>
+    </array>
+</dict>
+</plist>
