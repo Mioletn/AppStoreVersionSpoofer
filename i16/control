@@ -1,0 +1,9 @@
+Package: com.i16.panel
+Name: i16
+Version: 1.0
+Architecture: iphoneos-arm
+Description: iOS 16 的框架 API 在 iOS 12.2 上的用户态实现。含可注入的 i16shim.dylib。
+Maintainer: i16
+Author: i16
+Section: Applications
+Depends: firmware (>= 12.0)

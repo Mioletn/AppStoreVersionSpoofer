@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>zh_CN</string>
+	<key>CFBundleDisplayName</key>
+	<string>i16</string>
+	<key>CFBundleExecutable</key>
+	<string>i16</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.i16.panel</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>i16</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<key>CFBundleSignature</key>
+	<string>????</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+
+	<!-- SpringBoard 靠这几个字段判断"这个包能不能在本平台跑"。
+	     缺了 CFBundleSupportedPlatforms 会直接拒绝启动 —— 表现为 uiopen 返回 0、
+	     进程从不出现、连崩溃日志都不留。MacPad 上踩过同一个坑。 -->
+	<key>CFBundleSupportedPlatforms</key>
+	<array>
+		<string>iPhoneOS</string>
+	</array>
+	<key>DTPlatformName</key>
+	<string>iphoneos</string>
+	<key>DTPlatformVersion</key>
+	<string>12.4</string>
+	<key>DTSDKName</key>
+	<string>iphoneos12.4</string>
+	<key>DTSDKBuild</key>
+	<string>16G73</string>
+	<key>DTXcode</key>
+	<string>1040</string>
+	<key>DTXcodeBuild</key>
+	<string>12B5044c</string>
+
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.developer-tools</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>12.2</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>MinimumOSVersion</key>
+	<string>12.2</string>
+	<key>UIDeviceFamily</key>
+	<array>
+		<integer>1</integer>
+		<integer>2</integer>
+	</array>
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>arm64</string>
+	</array>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UIStatusBarStyle</key>
+	<string>UIStatusBarStyleDefault</string>
+	<key>UIViewControllerBasedStatusBarAppearance</key>
+	<true/>
+	<key>UIRequiresFullScreen</key>
+	<false/>
+
+	<!-- 没有 launch storyboard 也没有 launch image 时，iPad 会把这个 app 塞进
+	     375x667 的 iPhone 兼容窗口（第一版截图就是 750x1334）。Theos 不编译
+	     storyboard，所以走 UILaunchImages 这条老路 —— iOS 12 完整支持。
+	     图是纯白的，唯一作用是"声明本包支持全屏"。 -->
+	<key>UILaunchImages</key>
+	<array>
+		<dict>
+			<key>UILaunchImageMinimumOSVersion</key><string>8.0</string>
+			<key>UILaunchImageName</key><string>LaunchImage-iPadPro11</string>
+			<key>UILaunchImageOrientation</key><string>Portrait</string>
+			<key>UILaunchImageSize</key><string>{834, 1194}</string>
+		</dict>
+		<dict>
+			<key>UILaunchImageMinimumOSVersion</key><string>8.0</string>
+			<key>UILaunchImageName</key><string>LaunchImage-iPadPro11-L</string>
+			<key>UILaunchImageOrientation</key><string>Landscape</string>
+			<key>UILaunchImageSize</key><string>{1194, 834}</string>
+		</dict>
+		<dict>
+			<key>UILaunchImageMinimumOSVersion</key><string>8.0</string>
+			<key>UILaunchImageName</key><string>LaunchImage-iPadPro12</string>
+			<key>UILaunchImageOrientation</key><string>Portrait</string>
+			<key>UILaunchImageSize</key><string>{1024, 1366}</string>
+		</dict>
+		<dict>
+			<key>UILaunchImageMinimumOSVersion</key><string>8.0</string>
+			<key>UILaunchImageName</key><string>LaunchImage-iPadPro12-L</string>
+			<key>UILaunchImageOrientation</key><string>Landscape</string>
+			<key>UILaunchImageSize</key><string>{1366, 1024}</string>
+		</dict>
+		<dict>
+			<key>UILaunchImageMinimumOSVersion</key><string>8.0</string>
+			<key>UILaunchImageName</key><string>LaunchImage-iPadPro10</string>
+			<key>UILaunchImageOrientation</key><string>Portrait</string>
+			<key>UILaunchImageSize</key><string>{834, 1112}</string>
+		</dict>
+		<dict>
+			<key>UILaunchImageMinimumOSVersion</key><string>8.0</string>
+			<key>UILaunchImageName</key><string>LaunchImage-iPadPro10-L</string>
+			<key>UILaunchImageOrientation</key><string>Landscape</string>
+			<key>UILaunchImageSize</key><string>{1112, 834}</string>
+		</dict>
+		<dict>
+			<key>UILaunchImageMinimumOSVersion</key><string>8.0</string>
+			<key>UILaunchImageName</key><string>LaunchImage-iPad97</string>
+			<key>UILaunchImageOrientation</key><string>Portrait</string>
+			<key>UILaunchImageSize</key><string>{768, 1024}</string>
+		</dict>
+		<dict>
+			<key>UILaunchImageMinimumOSVersion</key><string>8.0</string>
+			<key>UILaunchImageName</key><string>LaunchImage-iPad97-L</string>
+			<key>UILaunchImageOrientation</key><string>Landscape</string>
+			<key>UILaunchImageSize</key><string>{1024, 768}</string>
+		</dict>
+		<dict>
+			<key>UILaunchImageMinimumOSVersion</key><string>8.0</string>
+			<key>UILaunchImageName</key><string>LaunchImage-iPhoneX</string>
+			<key>UILaunchImageOrientation</key><string>Portrait</string>
+			<key>UILaunchImageSize</key><string>{375, 812}</string>
+		</dict>
+		<dict>
+			<key>UILaunchImageMinimumOSVersion</key><string>8.0</string>
+			<key>UILaunchImageName</key><string>LaunchImage-iPhoneX-L</string>
+			<key>UILaunchImageOrientation</key><string>Landscape</string>
+			<key>UILaunchImageSize</key><string>{812, 375}</string>
+		</dict>
+		<dict>
+			<key>UILaunchImageMinimumOSVersion</key><string>8.0</string>
+			<key>UILaunchImageName</key><string>LaunchImage-iPhone11ProMax</string>
+			<key>UILaunchImageOrientation</key><string>Portrait</string>
+			<key>UILaunchImageSize</key><string>{414, 896}</string>
+		</dict>
+		<dict>
+			<key>UILaunchImageMinimumOSVersion</key><string>8.0</string>
+			<key>UILaunchImageName</key><string>LaunchImage-iPhone11ProMax-L</string>
+			<key>UILaunchImageOrientation</key><string>Landscape</string>
+			<key>UILaunchImageSize</key><string>{896, 414}</string>
+		</dict>
+	</array>
+
+	<!-- 这台设备的 uiopen 只认 URL（打印 usage: uiopen <url>），不认 -b <bundleid>。
+	     所以必须注册 scheme，用 `uiopen i16://` 才能拉起来。 -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.i16.panel</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>i16</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

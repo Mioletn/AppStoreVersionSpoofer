@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>application-identifier</key>
+	<string>com.i16.panel</string>
+	<key>com.apple.developer.team-identifier</key>
+	<string>I16PANEL</string>
+	<key>get-task-allow</key>
+	<true/>
+	<key>com.apple.private.security.no-sandbox</key>
+	<true/>
+	<key>platform-application</key>
+	<true/>
+	<!-- 屏幕采集相关的私有权利。越狱环境 AMFI 被绕过，ldid 签什么就生效什么；
+	     但在原版固件上这几条是签不进去的 —— 所以整条链路本身就依赖越狱。 -->
+	<key>com.apple.private.iosurface</key>
+	<true/>
+	<key>com.apple.private.IOMobileFramebuffer</key>
+	<true/>
+	<key>com.apple.private.surface-mapping</key>
+	<true/>
+	<key>com.apple.private.screencapture</key>
+	<true/>
+</dict>
+</plist>

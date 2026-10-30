@@ -1,0 +1,157 @@
+name: Build i16
+
+# 只构建 i16/ 这个子工程，不碰仓库根的 tweak。
+# 触发方式二选一：push 到 i16 分支，或手动 workflow_dispatch。
+on:
+  push:
+    branches: [ i16 ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git make perl build-essential \
+            libcurl4-openssl-dev libxml2-dev fakeroot dpkg-dev bzip2 \
+            libtinfo6 xz-utils rsync zip
+          sudo update-alternatives --set fakeroot /usr/bin/fakeroot-sysv 2>/dev/null || true
+
+      - name: Setup Theos
+        run: |
+          git clone --recursive https://github.com/theos/theos.git "$HOME/theos"
+          echo "THEOS=$HOME/theos" >> "$GITHUB_ENV"
+
+      - name: Download iOS toolchain
+        run: |
+          curl -sL https://github.com/L1ghtmann/llvm-project/releases/latest/download/iOSToolchain-x86_64.tar.xz \
+            | tar -xJ -C "$THEOS/toolchain/"
+          "$THEOS/toolchain/linux/iphone/bin/clang" --version
+
+      - name: Download iPhoneOS12.4 SDK
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p "$THEOS/sdks"
+          SDK_URL=$(curl -sL -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/theos/sdks/releases/latest" \
+            | python3 -c "import sys,json; d=json.load(sys.stdin); print([a['browser_download_url'] for a in d['assets'] if a['name']=='iPhoneOS12.4.sdk.tar.xz'][0])")
+          echo "SDK_URL=$SDK_URL"
+          curl -sL "$SDK_URL" | tar -xJ -C "$THEOS/sdks"
+          ls -1 "$THEOS/sdks"
+
+      - name: Compile i16
+        run: |
+          export THEOS="$THEOS"
+          cd i16
+          make clean || true
+          make package FINALPACKAGE=1
+          echo "=== 产物 ==="
+          find . -name "*.app" -o -name "*.dylib" -o -name "*.deb" | sort
+
+      - name: Compile carprobe
+        # 独立 target：CoreUI / CUICatalog 的探测工具，装到设备上以 root 跑。
+        run: |
+          export THEOS="$THEOS"
+          cd i16/carprobe
+          make clean || true
+          make FINALPACKAGE=1
+          echo "=== carprobe 产物 ==="
+          find .theos -type f -name carprobe | sort
+
+      - name: Package IPA
+        run: |
+          set -e
+          cd i16
+          # 优先取 staging 里那份（已按 INSTALL_PATH 归位、签名完整），
+          # 退而求其次才用 obj 下的中间产物。
+          APP=$(find . -type d -path "*/_/Applications/i16.app" | head -1)
+          [ -n "$APP" ] || APP=$(find . -type d -name "i16.app" | sort | head -1)
+          echo "APP=$APP"
+          [ -n "$APP" ] || { echo "没有产出 i16.app"; exit 1; }
+          DYLIB=$(find . -type f -name "i16shim.dylib" | head -1)
+          echo "DYLIB=$DYLIB"
+          PROBE=$(find carprobe/.theos -type f -name carprobe -not -path "*.dSYM/*" | head -1)
+          echo "PROBE=$PROBE"
+          SPROBE=$(find carprobe/.theos -type f -name sfprobe -not -path "*.dSYM/*" | head -1)
+          echo "SPROBE=$SPROBE"
+          STPROBE=$(find carprobe/.theos -type f -name streamprobe -not -path "*.dSYM/*" | head -1)
+          echo "STPROBE=$STPROBE"
+          [ -n "$PROBE" ] || { echo "carprobe 没编出来"; exit 1; }
+
+          rm -rf ipapkg && mkdir -p ipapkg/Payload
+          cp -R "$APP" ipapkg/Payload/i16.app
+          # 兜底：Theos 只认项目根的 Info.plist，一旦哪天路径又飘了，
+          # 打出来的 ipa 会是个没有 Info.plist 的空壳 —— 这里补上并留痕。
+          if [ ! -f ipapkg/Payload/i16.app/Info.plist ]; then
+            echo "!! bundle 里没有 Info.plist，从项目根补"
+            cp Info.plist ipapkg/Payload/i16.app/Info.plist
+          fi
+          # shim 一起塞进 bundle：注入别的 App 时直接从包里取，不必再单独拷。
+          [ -n "$DYLIB" ] && cp "$DYLIB" ipapkg/Payload/i16.app/i16shim.dylib || true
+          # 探针也塞进去：装完 app 就能在 SSH 下直接跑，不必再走一次安装。
+          cp "$PROBE" ipapkg/Payload/i16.app/carprobe
+          chmod 755 ipapkg/Payload/i16.app/carprobe
+          [ -n "$SPROBE" ] && cp "$SPROBE" ipapkg/Payload/i16.app/sfprobe && chmod 755 ipapkg/Payload/i16.app/sfprobe
+          [ -n "$STPROBE" ] && cp "$STPROBE" ipapkg/Payload/i16.app/streamprobe && chmod 755 ipapkg/Payload/i16.app/streamprobe
+          cd ipapkg && zip -qry ../i16.ipa Payload
+          cd ..
+          ls -l i16.ipa
+          echo "=== bundle 内容 ==="
+          find ipapkg/Payload/i16.app -maxdepth 1 | sort
+
+      - name: Verify IPA
+        # 结构不对就当场失败，别把一个开不了的包传到设备上再排查。
+        run: |
+          set -e
+          cd i16
+          python3 - <<'EOF'
+          import plistlib, sys, zipfile
+          z = zipfile.ZipFile("i16.ipa")
+          names = set(z.namelist())
+          app = "Payload/i16.app/"
+          need = [app + "i16", app + "Info.plist"]
+          missing = [n for n in need if n not in names]
+          if missing:
+              print("缺失:", missing); sys.exit(1)
+          info = plistlib.loads(z.read(app + "Info.plist"))
+          print("bundle id:", info.get("CFBundleIdentifier"))
+          print("executable:", info.get("CFBundleExecutable"))
+          print("minOS:", info.get("MinimumOSVersion"))
+          print("platforms:", info.get("CFBundleSupportedPlatforms"))
+          print("url schemes:", [u.get("CFBundleURLSchemes") for u in info.get("CFBundleURLTypes", [])])
+          print("files:", sorted(n for n in names if not n.endswith("/")))
+          if app + "carprobe" not in names:
+              print("carprobe 没打进 bundle"); sys.exit(1)
+          if info.get("CFBundleExecutable") != "i16":
+              print("CFBundleExecutable 与可执行文件名不符"); sys.exit(1)
+          # 缺这个 SpringBoard 会静默拒绝启动，装到设备上再查很费时间。
+          if "iPhoneOS" not in (info.get("CFBundleSupportedPlatforms") or []):
+              print("缺 CFBundleSupportedPlatforms=iPhoneOS，启动会被拒"); sys.exit(1)
+          if not info.get("CFBundleURLTypes"):
+              print("缺 CFBundleURLTypes，uiopen 拉不起来"); sys.exit(1)
+          # 启动图不在就说明 RESOURCE_DIRS 没生效，装上去会是 iPhone 兼容模式。
+          launches = [n for n in names if n.startswith(app + "LaunchImage-")]
+          print("launch images:", len(launches))
+          if len(launches) < 4:
+              print("启动图没打进 bundle，iPad 上会退化成兼容模式"); sys.exit(1)
+          print("IPA 结构 OK")
+          EOF
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: i16-ipa
+          path: i16/i16.ipa
+
+      - name: Upload deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: i16-deb
+          path: i16/packages/*.deb
+          if-no-files-found: warn
