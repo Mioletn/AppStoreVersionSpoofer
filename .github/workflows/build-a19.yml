@@ -1,0 +1,77 @@
+name: Build Maidong KTV (API 19)
+
+# 在 GitHub Actions 上编译麦动 KTV（Android 4.4 / API 19 适配分支）。
+# 源码以分片形式提交（.ci/parts/part-NN，每片 8MB —— 单次 30MB 的 blob 上传会被代理拒绝），
+# 构建时先拼回 maidong-src.tar.gz、校验 md5 再解包。触发：推送到 maidong-a19 分支，或手动 workflow_dispatch。
+on:
+  push:
+    branches: [ maidong-a19 ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Unpack source
+        run: |
+          cat .ci/parts/part-* > maidong-src.tar.gz
+          echo "$(cat .ci/parts/md5.txt)  maidong-src.tar.gz" | md5sum -c -
+          tar -xzf maidong-src.tar.gz
+          chmod +x gradlew
+          ls -la
+          sed -n '1,40p' app/build.gradle
+
+      # Android 4.4 的系统 WebView 是 Chromium 30：没有原生 Promise（Chrome 32 才有）、
+      # 不支持任何 ES6+ 语法。越界时整段脚本语法报错 / Promise is not defined，
+      # 取址链路静默失效（KtvApi 不导出 → 只剩原生兜底）。这里在编译前先卡住。
+      - name: JS 兼容性自检（ES5 + Promise polyfill）
+        run: |
+          npm install --no-save --prefix /tmp/jscheck acorn@8 > /dev/null
+          NODE_PATH=/tmp/jscheck/node_modules node .ci/check_js_a19.js
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      # ubuntu-latest 已自带 Android SDK（/usr/local/lib/android/sdk，cmdline-tools 16）。
+      # 不再用 android-actions/setup-android@v3：它内部会执行 `sdkmanager tools`，
+      # 而该包在新版 cmdline-tools 里已不存在，会直接失败。
+      - name: Install SDK packages
+        env:
+          ANDROID_HOME: /usr/local/lib/android/sdk
+          ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+        run: |
+          SDKM=$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | head -1)
+          echo "sdkmanager=$SDKM"
+          yes | "$SDKM" --licenses > /dev/null || true
+          "$SDKM" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      # app/build.gradle 的 signingConfigs.release 读取 app/../../ktv_keystore.jks，
+      # 即 workspace 的上一级目录；这里生成一份测试签名（与官方发布签名不同）。
+      - name: Generate signing keystore
+        run: |
+          keytool -genkeypair -v -keystore ../ktv_keystore.jks -alias ktv \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass 123456 -keypass 123456 \
+            -dname "CN=Maidong KTV, OU=Dev, O=Maidong, L=Beijing, ST=Beijing, C=CN"
+
+      - name: Build release APK
+        run: ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Collect artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: maidong-a19-build
+          path: |
+            app/build/outputs/apk/release/*.apk
+            app/build/outputs/mapping/release/mapping.txt
+            app/build/reports/lint-results-release.txt
+          if-no-files-found: warn
